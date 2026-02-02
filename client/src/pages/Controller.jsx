@@ -11,10 +11,13 @@ import {
   X,
   Timer as TimerIcon,
 } from "lucide-react";
+import { getServerConfig } from "../utils/network";
 
+/**
+ * SPOTIT CONTROLLER COMPONENT
+ */
 const Controller = () => {
   const { roomId, token } = useParams();
-  const navigate = useNavigate();
   const [status, setStatus] = useState("CONNECTING");
   const [error, setError] = useState(null);
 
@@ -40,31 +43,37 @@ const Controller = () => {
   const lastTouchRef = useRef(null);
 
   useEffect(() => {
-    const url =
-      window.location.hostname === "localhost"
-        ? "http://localhost"
-        : `http://${window.location.hostname}`;
+    const { geckosUrl, geckosPort, geckosPath } = getServerConfig();
 
     const channel = geckos({
-      url,
-      port: 3000,
+      url: geckosUrl,
+      port: geckosPort,
+      ...(geckosPath ? { path: geckosPath } : {}),
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
-    channel.onConnect((error) => {
-      if (error) {
+    channel.onConnect((err) => {
+      if (err) {
         setError("Connection error. Retrying...");
         return;
       }
       channelRef.current = channel;
       setError(null);
-
       channel.emit("probeRoom", { roomId });
 
-      const savedData = localStorage.getItem(`spotit_session_${roomId}`);
+      const sessionKey = "spotit_session_" + roomId;
+      const savedData = localStorage.getItem(sessionKey);
       if (savedData) {
-        const { teamName: savedTeam } = JSON.parse(savedData);
-        channel.emit("joinRoom", { roomId, token, teamName: savedTeam });
+        try {
+          const parsed = JSON.parse(savedData);
+          channel.emit("joinRoom", {
+            roomId,
+            token,
+            teamName: parsed.teamName,
+          });
+        } catch (e) {
+          setStatus("JOINING");
+        }
       } else {
         setStatus("JOINING");
       }
@@ -74,26 +83,28 @@ const Controller = () => {
       setStatus("CONNECTING");
     });
 
-    channel.on("roomInfo", ({ teamName }) => {
-      if (teamName) setTeamName(teamName);
+    channel.on("roomInfo", (data) => {
+      if (data && data.teamName) setTeamName(data.teamName);
     });
 
-    channel.on("joinResponse", ({ success, error, isLeader, teamName }) => {
-      if (success) {
-        setIsLeader(isLeader);
-        if (teamName) {
-          setTeamName(teamName);
+    channel.on("joinResponse", (res) => {
+      if (res.success) {
+        setIsLeader(!!res.isLeader);
+        if (res.teamName) {
+          setTeamName(res.teamName);
+          const sessionKey = "spotit_session_" + roomId;
           localStorage.setItem(
-            `spotit_session_${roomId}`,
-            JSON.stringify({ teamName }),
+            sessionKey,
+            JSON.stringify({ teamName: res.teamName }),
           );
         }
         setHasJoined(true);
-        if (isLeader) setIsReady(true);
+        if (res.isLeader) setIsReady(true);
         setStatus("LOBBY");
       } else {
-        localStorage.removeItem(`spotit_session_${roomId}`);
-        setError(error || "Failed to join room");
+        const sessionKey = "spotit_session_" + roomId;
+        localStorage.removeItem(sessionKey);
+        setError(res.error || "Failed to join room");
         setStatus("JOINING");
       }
     });
@@ -104,22 +115,22 @@ const Controller = () => {
       if (data.status === "LOBBY") setStatus("LOBBY");
     });
 
-    channel.on("gameStarted", ({ clue }) => {
-      setCurrentClue(clue);
+    channel.on("gameStarted", (data) => {
+      setCurrentClue(data.clue || "");
       setStatus("PLAYING");
       setScore(0);
       setTimeLeft(30);
     });
 
-    channel.on("timerUpdate", ({ timeLeft }) => {
-      setTimeLeft(timeLeft);
+    channel.on("timerUpdate", (data) => {
+      setTimeLeft(data.timeLeft);
     });
 
-    channel.on("spotResult", ({ success, points, nextClue, isGameOver }) => {
-      if (success) {
-        setScore((prev) => prev + points);
+    channel.on("spotResult", (res) => {
+      if (res.success) {
+        setScore((prev) => prev + (res.points || 0));
         setLastResult("HIT");
-        setCurrentClue(nextClue || "Challenge Complete!");
+        if (res.nextClue) setCurrentClue(res.nextClue);
         if ("vibrate" in navigator) navigator.vibrate([50, 30, 50]);
       } else {
         setLastResult("MISS");
@@ -133,7 +144,8 @@ const Controller = () => {
     });
 
     channel.on("exited", () => {
-      localStorage.removeItem(`spotit_session_${roomId}`);
+      const sessionKey = "spotit_session_" + roomId;
+      localStorage.removeItem(sessionKey);
       window.location.href = "/screen";
     });
 
@@ -146,16 +158,24 @@ const Controller = () => {
     e.preventDefault();
     const finalName = teamName || teamNameInput;
     if (!finalName.trim()) return;
-    channelRef.current.emit("joinRoom", { roomId, token, teamName: finalName });
+    if (channelRef.current) {
+      channelRef.current.emit("joinRoom", {
+        roomId,
+        token,
+        teamName: finalName,
+      });
+    }
   };
 
   const handleReady = () => {
     setIsReady(true);
-    channelRef.current.emit("setReady");
+    if (channelRef.current) {
+      channelRef.current.emit("setReady");
+    }
   };
 
   const handleStartGame = () => {
-    if (lobbyInfo.allReady && isLeader) {
+    if (isLeader && channelRef.current) {
       channelRef.current.emit("startGame");
     }
   };
@@ -164,20 +184,19 @@ const Controller = () => {
     if (channelRef.current) {
       channelRef.current.emit("exitRoom");
     } else {
-      localStorage.removeItem(`spotit_session_${roomId}`);
-      navigate("/screen");
+      const sessionKey = "spotit_session_" + roomId;
+      localStorage.removeItem(sessionKey);
+      window.location.href = "/screen";
     }
   };
 
   const handleTouchMove = (e) => {
     if (status !== "PLAYING") return;
     const touch = e.touches[0];
-
-    if (lastTouchRef.current) {
-      const movementScale = 0.35;
-      const dx = (touch.clientX - lastTouchRef.current.x) * movementScale;
-      const dy = (touch.clientY - lastTouchRef.current.y) * movementScale;
-
+    if (lastTouchRef.current && channelRef.current) {
+      const scale = 0.35;
+      const dx = (touch.clientX - lastTouchRef.current.x) * scale;
+      const dy = (touch.clientY - lastTouchRef.current.y) * scale;
       cursorRef.current.x = Math.max(
         0,
         Math.min(100, cursorRef.current.x + dx),
@@ -186,7 +205,6 @@ const Controller = () => {
         0,
         Math.min(100, cursorRef.current.y + dy),
       );
-
       channelRef.current.emit(
         "cursorUpdate",
         { x: cursorRef.current.x, y: cursorRef.current.y },
@@ -208,7 +226,7 @@ const Controller = () => {
           className="logo-text"
           style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}
         >
-          Connection Lost
+          Error
         </h1>
         <p style={{ opacity: 0.6, marginBottom: "2rem" }}>{error}</p>
         <button
@@ -224,7 +242,6 @@ const Controller = () => {
 
   return (
     <div className="controller-container overflow-hidden">
-      {/* HEADER */}
       <header
         className="screen-header"
         style={{ height: "70px", padding: "0 1.5rem" }}
@@ -265,7 +282,6 @@ const Controller = () => {
             {teamName || "SpotIt"}
           </span>
         </div>
-
         <div className="flex items-center gap-3">
           {status === "PLAYING" && (
             <div style={{ textAlign: "right", marginRight: "0.5rem" }}>
@@ -310,12 +326,7 @@ const Controller = () => {
         </div>
       </header>
 
-      {/* MAIN CONTENT AREA */}
-      <main
-        className="flex-col h-full relative"
-        style={{ display: "flex", flex: 1 }}
-      >
-        {/* JOINING / LOBBY / RESULTS OVERLAYS */}
+      <main style={{ display: "flex", flex: 1 }} className="flex-col relative">
         {(status === "JOINING" ||
           status === "LOBBY" ||
           status === "RESULTS") && (
@@ -366,6 +377,7 @@ const Controller = () => {
                           outline: "none",
                           textAlign: "center",
                         }}
+                        autoFocus
                       />
                     ) : (
                       <div
@@ -412,7 +424,6 @@ const Controller = () => {
                   >
                     {teamName}
                   </h2>
-
                   {status === "RESULTS" && (
                     <div
                       style={{
@@ -445,7 +456,6 @@ const Controller = () => {
                       </p>
                     </div>
                   )}
-
                   {isLeader ? (
                     <div
                       style={{
@@ -464,12 +474,10 @@ const Controller = () => {
                           fontWeight: 700,
                         }}
                       >
-                        <CheckCircle2 size={18} />{" "}
-                        <span>You are the Leader</span>
+                        <CheckCircle2 size={18} /> <span>You are Leader</span>
                       </div>
                       <p style={{ fontSize: "0.8rem", opacity: 0.5 }}>
-                        {lobbyInfo.readyCount}/{lobbyInfo.totalPlayers} Players
-                        Ready
+                        {lobbyInfo.readyCount}/{lobbyInfo.totalPlayers} Ready
                       </p>
                       <button
                         onClick={handleStartGame}
@@ -483,12 +491,8 @@ const Controller = () => {
                           opacity: lobbyInfo.allReady ? 1 : 0.3,
                         }}
                       >
-                        <div className="flex items-center justify-center gap-2">
-                          <Play fill="currentColor" size={20} />
-                          <span>
-                            {status === "RESULTS" ? "RESTART" : "START GAME"}
-                          </span>
-                        </div>
+                        <Play fill="currentColor" size={20} />{" "}
+                        {status === "RESULTS" ? "RESTART" : "START"}
                       </button>
                     </div>
                   ) : !isReady ? (
@@ -503,7 +507,7 @@ const Controller = () => {
                         width: "100%",
                       }}
                     >
-                      READY TO PLAY
+                      READY
                     </button>
                   ) : (
                     <div
@@ -514,7 +518,7 @@ const Controller = () => {
                       <p
                         style={{ fontWeight: 800, textTransform: "uppercase" }}
                       >
-                        You are ready
+                        Ready
                       </p>
                       <p style={{ fontSize: "0.8rem", opacity: 0.5 }}>
                         Waiting for leader...
@@ -527,7 +531,6 @@ const Controller = () => {
           </div>
         )}
 
-        {/* GAMEPLAY CONTROLS */}
         {status === "PLAYING" && (
           <div
             className="flex-col animate-in"
@@ -535,11 +538,7 @@ const Controller = () => {
           >
             <div
               className="flex-col"
-              style={{
-                display: "flex",
-                gap: "0.25rem",
-                marginBottom: "0.5rem",
-              }}
+              style={{ display: "flex", gap: "0.25rem" }}
             >
               <span
                 style={{
@@ -547,10 +546,9 @@ const Controller = () => {
                   fontWeight: 900,
                   opacity: 0.5,
                   textTransform: "uppercase",
-                  letterSpacing: "1px",
                 }}
               >
-                Current Target
+                Riddle
               </span>
               <p
                 style={{ fontWeight: 800, fontStyle: "italic", color: "white" }}
@@ -558,30 +556,15 @@ const Controller = () => {
                 {currentClue}
               </p>
             </div>
-
             <div
               onTouchMove={handleTouchMove}
               onTouchEnd={() => {
                 lastTouchRef.current = null;
               }}
               className="touchpad"
-              style={{ margin: 0, position: "relative" }}
+              style={{ margin: 0, position: "relative", flex: 1 }}
             >
               <MousePointer2 size={48} style={{ opacity: 0.1 }} />
-              <p
-                style={{
-                  position: "absolute",
-                  bottom: "2rem",
-                  fontSize: "10px",
-                  fontWeight: 900,
-                  opacity: 0.2,
-                  letterSpacing: "4px",
-                  textTransform: "uppercase",
-                }}
-              >
-                Touchpad
-              </p>
-
               {lastResult === "HIT" && (
                 <div
                   style={{
@@ -589,7 +572,7 @@ const Controller = () => {
                     inset: 0,
                     background: "rgba(16, 185, 129, 0.1)",
                     borderRadius: "var(--radius-lg)",
-                    animation: "pulse-danger 0.5s",
+                    animation: "ping 0.5s",
                   }}
                 />
               )}
@@ -600,21 +583,21 @@ const Controller = () => {
                     inset: 0,
                     background: "rgba(239, 68, 68, 0.1)",
                     borderRadius: "var(--radius-lg)",
-                    animation: "pulse-danger 0.5s",
+                    animation: "ping 0.5s",
                   }}
                 />
               )}
             </div>
-
             <button
               onClick={() => {
-                if (status === "PLAYING") channelRef.current.emit("spotObject");
+                if (status === "PLAYING" && channelRef.current)
+                  channelRef.current.emit("spotObject");
               }}
               className="spot-btn"
               style={{
                 margin: 0,
                 flex: "none",
-                height: "140px",
+                height: "120px",
                 background:
                   lastResult === "HIT"
                     ? "var(--accent-success)"
@@ -623,10 +606,8 @@ const Controller = () => {
                       : "var(--accent-primary)",
               }}
             >
-              <div className="flex flex-col items-center gap-1">
-                <Target size={32} />
-                <span>SPOT OBJECT</span>
-              </div>
+              <Target size={32} />
+              <span style={{ display: "block", marginTop: "4px" }}>SPOT</span>
             </button>
           </div>
         )}

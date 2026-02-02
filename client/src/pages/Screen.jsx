@@ -10,6 +10,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import ScoreCard from "../components/ScoreCard";
+import { getServerConfig } from "../utils/network";
 
 const Screen = () => {
   const [roomId, setRoomId] = useState(null);
@@ -29,14 +30,13 @@ const Screen = () => {
   const channelRef = useRef(null);
 
   useEffect(() => {
-    const url =
-      window.location.hostname === "localhost"
-        ? "http://localhost"
-        : `http://${window.location.hostname}`;
+    // Use the SlingShot-style dynamic network configuration
+    const { geckosUrl, geckosPort, geckosPath } = getServerConfig();
 
     const channel = geckos({
-      url,
-      port: 3000,
+      url: geckosUrl,
+      port: geckosPort,
+      ...(geckosPath && { path: geckosPath }),
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
