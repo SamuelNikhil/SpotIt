@@ -1,3 +1,4 @@
+import "dotenv/config";
 import geckos from "@geckos.io/server";
 import express from "express";
 import http from "http";
@@ -16,11 +17,16 @@ import { randomBytes } from "crypto";
 
 const app = express();
 app.use(helmet());
-app.use(cors());
+app.use(
+  cors({
+    origin: process.env.ALLOWED_ORIGIN || "*",
+  }),
+);
 
 const server = http.createServer(app);
 const io = geckos({
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  cors: { origin: process.env.ALLOWED_ORIGIN || "*" },
 });
 
 io.addServer(server);
