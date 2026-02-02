@@ -15,10 +15,9 @@ import {
 const Controller = () => {
   const { roomId, token } = useParams();
   const navigate = useNavigate();
-  const [status, setStatus] = useState("CONNECTING"); // CONNECTING, JOINING, LOBBY, PLAYING, RESULTS
+  const [status, setStatus] = useState("CONNECTING");
   const [error, setError] = useState(null);
 
-  // Persistence & Logic states
   const [isLeader, setIsLeader] = useState(false);
   const [hasJoined, setHasJoined] = useState(false);
   const [teamNameInput, setTeamNameInput] = useState("");
@@ -54,16 +53,14 @@ const Controller = () => {
 
     channel.onConnect((error) => {
       if (error) {
-        setError("Connection lost. Reconnecting...");
+        setError("Connection error. Retrying...");
         return;
       }
       channelRef.current = channel;
       setError(null);
 
-      // Probe room state for existing data
       channel.emit("probeRoom", { roomId });
 
-      // Check for reconnection data in localStorage
       const savedData = localStorage.getItem(`spotit_session_${roomId}`);
       if (savedData) {
         const { teamName: savedTeam } = JSON.parse(savedData);
@@ -77,7 +74,7 @@ const Controller = () => {
       setStatus("CONNECTING");
     });
 
-    channel.on("roomInfo", ({ teamName, status: roomStatus }) => {
+    channel.on("roomInfo", ({ teamName }) => {
       if (teamName) setTeamName(teamName);
     });
 
@@ -96,7 +93,7 @@ const Controller = () => {
         setStatus("LOBBY");
       } else {
         localStorage.removeItem(`spotit_session_${roomId}`);
-        setError(error || "Failed to join");
+        setError(error || "Failed to join room");
         setStatus("JOINING");
       }
     });
@@ -137,13 +134,13 @@ const Controller = () => {
 
     channel.on("exited", () => {
       localStorage.removeItem(`spotit_session_${roomId}`);
-      navigate("/screen");
+      window.location.href = "/screen";
     });
 
     return () => {
       if (channelRef.current) channelRef.current.close();
     };
-  }, [roomId, token, navigate]);
+  }, [roomId, token]);
 
   const handleJoin = (e) => {
     e.preventDefault();
@@ -177,7 +174,7 @@ const Controller = () => {
     const touch = e.touches[0];
 
     if (lastTouchRef.current) {
-      const movementScale = 0.3;
+      const movementScale = 0.35;
       const dx = (touch.clientX - lastTouchRef.current.x) * movementScale;
       const dy = (touch.clientY - lastTouchRef.current.y) * movementScale;
 
@@ -201,206 +198,411 @@ const Controller = () => {
 
   if (error && status === "CONNECTING") {
     return (
-      <div className="min-h-screen bg-dark flex flex-col items-center justify-center p-6 text-center text-white">
-        <AlertCircle className="text-accent mb-4" size={48} />
-        <h1 className="text-2xl font-bold mb-2">Connection Error</h1>
-        <p className="opacity-60 mb-6">{error}</p>
+      <div className="controller-container items-center justify-center p-8 text-center">
+        <AlertCircle
+          size={64}
+          color="var(--accent-error)"
+          style={{ marginBottom: "1.5rem" }}
+        />
+        <h1
+          className="logo-text"
+          style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}
+        >
+          Connection Lost
+        </h1>
+        <p style={{ opacity: 0.6, marginBottom: "2rem" }}>{error}</p>
         <button
           onClick={() => window.location.reload()}
-          className="bg-primary px-8 py-3 rounded-xl font-bold"
+          className="spot-btn w-full"
+          style={{ flex: "none", padding: "1.25rem" }}
         >
-          Retry
+          Reconnect
         </button>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 bg-dark touch-none select-none flex flex-col overflow-hidden font-sans">
-      {/* PERSISTENT HEADER WITH EXIT */}
-      <div className="h-20 flex items-center justify-between px-6 bg-white/5 border-b border-white/10 z-30">
-        <div className="flex flex-col max-w-[40%]">
-          {status === "PLAYING" ? (
-            <>
-              <div className="flex items-center gap-2 mb-1">
+    <div className="controller-container overflow-hidden">
+      {/* HEADER */}
+      <header
+        className="screen-header"
+        style={{ height: "70px", padding: "0 1.5rem" }}
+      >
+        <div className="flex flex-col" style={{ maxWidth: "50%" }}>
+          <span
+            style={{
+              fontSize: "9px",
+              fontWeight: 900,
+              opacity: 0.4,
+              textTransform: "uppercase",
+              letterSpacing: "1px",
+            }}
+          >
+            {status === "PLAYING" ? (
+              <div className="flex items-center gap-1">
                 <TimerIcon
-                  className={
-                    timeLeft < 10
-                      ? "text-accent animate-pulse"
-                      : "text-white/40"
-                  }
-                  size={12}
+                  size={10}
+                  className={timeLeft < 10 ? "timer-danger" : ""}
                 />
-                <span
-                  className={`text-[10px] font-black uppercase tracking-widest ${timeLeft < 10 ? "text-accent" : "text-white/40"}`}
-                >
-                  {timeLeft}s
-                </span>
+                <span>{timeLeft}s Left</span>
               </div>
-              <span className="text-white font-bold text-xs truncate italic">
-                {currentClue}
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-1">
-                {status === "JOINING" ? "SPOTIT" : "TEAM"}
-              </span>
-              <span className="text-white font-bold text-sm truncate uppercase italic tracking-wider">
-                {teamName || "WELCOME"}
-              </span>
-            </>
-          )}
+            ) : (
+              "Team"
+            )}
+          </span>
+          <span
+            style={{
+              fontSize: "0.9rem",
+              fontWeight: 800,
+              fontStyle: "italic",
+              textTransform: "uppercase",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {teamName || "SpotIt"}
+          </span>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {status === "PLAYING" && (
-            <div className="text-right">
-              <span className="text-white/40 text-[10px] font-black uppercase tracking-widest block leading-none">
-                Pts
+            <div style={{ textAlign: "right", marginRight: "0.5rem" }}>
+              <span
+                style={{
+                  display: "block",
+                  fontSize: "9px",
+                  fontWeight: 900,
+                  opacity: 0.4,
+                }}
+              >
+                PTS
               </span>
-              <span className="text-primary font-mono font-black text-xl leading-none">
+              <span
+                style={{
+                  color: "var(--accent-primary)",
+                  fontWeight: 900,
+                  fontFamily: "monospace",
+                  fontSize: "1.25rem",
+                }}
+              >
                 {score}
               </span>
             </div>
           )}
           <button
             onClick={handleExit}
-            className="w-10 h-10 bg-white/5 rounded-full flex items-center justify-center border border-white/10 active:bg-accent/20 active:border-accent/50 transition-colors"
+            style={{
+              width: "40px",
+              height: "40px",
+              borderRadius: "50%",
+              border: "1px solid var(--glass-border)",
+              background: "rgba(255,255,255,0.05)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "rgba(255,255,255,0.3)",
+            }}
           >
-            <X className="text-white/40 active:text-accent" size={20} />
+            <X size={20} />
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* CONTENT AREA */}
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        {status === "JOINING" && (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 animate-in">
-            <div className="w-full max-w-sm glass rounded-3xl p-8 border border-white/10 shadow-2xl">
-              <Zap className="text-primary mx-auto mb-6" size={40} />
-              <h1 className="text-2xl font-black text-white text-center mb-8 uppercase italic tracking-wider">
-                {teamName ? "Join Team" : "Create Team"}
-              </h1>
-              <form onSubmit={handleJoin} className="space-y-4">
-                {!teamName ? (
-                  <input
-                    type="text"
-                    placeholder="Enter Team Name"
-                    maxLength={12}
-                    value={teamNameInput}
-                    onChange={(e) => setTeamNameInput(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 text-white text-lg focus:border-primary outline-none"
-                    autoFocus
+      {/* MAIN CONTENT AREA */}
+      <main
+        className="flex-col h-full relative"
+        style={{ display: "flex", flex: 1 }}
+      >
+        {/* JOINING / LOBBY / RESULTS OVERLAYS */}
+        {(status === "JOINING" ||
+          status === "LOBBY" ||
+          status === "RESULTS") && (
+          <div
+            className="flex-col items-center justify-center p-6 animate-in"
+            style={{ display: "flex", flex: 1 }}
+          >
+            <div
+              className="glass-card w-full p-8 text-center"
+              style={{ maxWidth: "400px" }}
+            >
+              {status === "JOINING" && (
+                <>
+                  <Zap
+                    size={48}
+                    color="var(--accent-primary)"
+                    style={{ margin: "0 auto 1.5rem" }}
                   />
-                ) : (
-                  <div className="text-center py-6 bg-white/5 rounded-2xl border border-white/10">
-                    <p className="text-white/40 text-xs uppercase mb-1">
-                      Team Name
-                    </p>
-                    <p className="text-xl font-black text-white italic">
-                      {teamName}
-                    </p>
-                  </div>
-                )}
-                <button
-                  type="submit"
-                  className="w-full bg-primary py-4 rounded-xl font-black text-white text-lg active:scale-95 transition-transform"
-                >
-                  {teamName ? "JOIN NOW" : "CONTINUE"}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {(status === "LOBBY" || status === "RESULTS") && (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 animate-in">
-            <div className="w-full max-w-sm glass rounded-3xl p-8 border border-white/10 text-center shadow-2xl">
-              <h1 className="text-3xl font-black text-white mb-8 italic uppercase tracking-tighter">
-                {teamName}
-              </h1>
-
-              {status === "RESULTS" ? (
-                <div className="space-y-6">
-                  <div className="bg-yellow-400/10 p-6 rounded-2xl border border-yellow-400/20">
-                    <p className="text-yellow-400 font-black text-sm uppercase tracking-widest mb-1">
-                      Final Score
-                    </p>
-                    <p className="text-5xl font-black text-white font-mono">
-                      {score}
-                    </p>
-                  </div>
-                  {isLeader ? (
+                  <h2
+                    className="logo-text"
+                    style={{ fontSize: "1.5rem", marginBottom: "1.5rem" }}
+                  >
+                    {teamName ? "JOIN TEAM" : "CREATE TEAM"}
+                  </h2>
+                  <form
+                    onSubmit={handleJoin}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "1rem",
+                    }}
+                  >
+                    {!teamName ? (
+                      <input
+                        type="text"
+                        placeholder="Team Name"
+                        maxLength={12}
+                        value={teamNameInput}
+                        onChange={(e) => setTeamNameInput(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "1.25rem",
+                          borderRadius: "16px",
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1px solid var(--glass-border)",
+                          color: "white",
+                          fontSize: "1.1rem",
+                          outline: "none",
+                          textAlign: "center",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          padding: "1.5rem",
+                          background: "rgba(255,255,255,0.03)",
+                          borderRadius: "16px",
+                          border: "1px solid var(--glass-border)",
+                        }}
+                      >
+                        <p
+                          style={{
+                            fontSize: "1.2rem",
+                            fontWeight: 900,
+                            fontStyle: "italic",
+                          }}
+                        >
+                          {teamName}
+                        </p>
+                      </div>
+                    )}
                     <button
-                      onClick={handleStartGame}
-                      className="w-full bg-primary py-6 rounded-2xl font-black text-white text-xl flex items-center justify-center gap-3 shadow-2xl active:scale-95"
+                      type="submit"
+                      className="spot-btn"
+                      style={{
+                        flex: "none",
+                        padding: "1rem",
+                        margin: 0,
+                        width: "100%",
+                        fontSize: "1.2rem",
+                      }}
                     >
-                      <Play fill="currentColor" size={24} /> RESTART GAME
+                      {teamName ? "JOIN NOW" : "CONTINUE"}
+                    </button>
+                  </form>
+                </>
+              )}
+
+              {(status === "LOBBY" || status === "RESULTS") && (
+                <>
+                  <h2
+                    className="logo-text"
+                    style={{ fontSize: "2rem", marginBottom: "1.5rem" }}
+                  >
+                    {teamName}
+                  </h2>
+
+                  {status === "RESULTS" && (
+                    <div
+                      style={{
+                        marginBottom: "2rem",
+                        padding: "1.5rem",
+                        background: "rgba(255,255,255,0.03)",
+                        borderRadius: "24px",
+                        border: "1px solid var(--glass-border)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "10px",
+                          fontWeight: 900,
+                          opacity: 0.4,
+                          letterSpacing: "2px",
+                        }}
+                      >
+                        FINAL SCORE
+                      </span>
+                      <p
+                        style={{
+                          fontSize: "3.5rem",
+                          fontWeight: 900,
+                          color: "var(--accent-primary)",
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        {score}
+                      </p>
+                    </div>
+                  )}
+
+                  {isLeader ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "1rem",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "0.5rem",
+                          color: "var(--accent-primary)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        <CheckCircle2 size={18} />{" "}
+                        <span>You are the Leader</span>
+                      </div>
+                      <p style={{ fontSize: "0.8rem", opacity: 0.5 }}>
+                        {lobbyInfo.readyCount}/{lobbyInfo.totalPlayers} Players
+                        Ready
+                      </p>
+                      <button
+                        onClick={handleStartGame}
+                        disabled={!lobbyInfo.allReady}
+                        className="spot-btn"
+                        style={{
+                          flex: "none",
+                          padding: "1.25rem",
+                          margin: 0,
+                          width: "100%",
+                          opacity: lobbyInfo.allReady ? 1 : 0.3,
+                        }}
+                      >
+                        <div className="flex items-center justify-center gap-2">
+                          <Play fill="currentColor" size={20} />
+                          <span>
+                            {status === "RESULTS" ? "RESTART" : "START GAME"}
+                          </span>
+                        </div>
+                      </button>
+                    </div>
+                  ) : !isReady ? (
+                    <button
+                      onClick={handleReady}
+                      className="spot-btn"
+                      style={{
+                        background: "var(--accent-secondary)",
+                        flex: "none",
+                        padding: "1.25rem",
+                        margin: 0,
+                        width: "100%",
+                      }}
+                    >
+                      READY TO PLAY
                     </button>
                   ) : (
-                    <p className="text-white/40 font-bold italic animate-pulse">
-                      Waiting for leader...
-                    </p>
+                    <div
+                      className="flex-col items-center gap-4"
+                      style={{ display: "flex" }}
+                    >
+                      <CheckCircle2 size={48} color="var(--accent-success)" />
+                      <p
+                        style={{ fontWeight: 800, textTransform: "uppercase" }}
+                      >
+                        You are ready
+                      </p>
+                      <p style={{ fontSize: "0.8rem", opacity: 0.5 }}>
+                        Waiting for leader...
+                      </p>
+                    </div>
                   )}
-                </div>
-              ) : isLeader ? (
-                <div className="space-y-6">
-                  <div className="bg-primary/10 p-4 rounded-2xl border border-primary/20 flex items-center justify-center gap-2 text-primary font-bold">
-                    <CheckCircle2 size={20} /> Leader
-                  </div>
-                  <p className="text-white/40 text-sm">
-                    {lobbyInfo.readyCount}/{lobbyInfo.totalPlayers} Players
-                    Ready
-                  </p>
-                  <button
-                    onClick={handleStartGame}
-                    disabled={!lobbyInfo.allReady}
-                    className="w-full bg-primary disabled:opacity-20 py-6 rounded-2xl font-black text-white text-xl flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-all"
-                  >
-                    <Play fill="currentColor" size={24} /> START GAME
-                  </button>
-                </div>
-              ) : !isReady ? (
-                <button
-                  onClick={handleReady}
-                  className="w-full bg-secondary py-6 rounded-2xl font-black text-white text-xl animate-pulse active:scale-95"
-                >
-                  READY TO PLAY
-                </button>
-              ) : (
-                <div className="flex flex-col items-center gap-6 animate-in">
-                  <CheckCircle2 className="text-green-500" size={64} />
-                  <p className="text-white font-black text-xl italic uppercase">
-                    YOU ARE READY
-                  </p>
-                  <div className="px-6 py-2 bg-white/5 rounded-full border border-white/10 text-white/60 font-bold">
-                    {lobbyInfo.readyCount}/{lobbyInfo.totalPlayers} Ready
-                  </div>
-                </div>
+                </>
               )}
             </div>
           </div>
         )}
 
+        {/* GAMEPLAY CONTROLS */}
         {status === "PLAYING" && (
-          <div className="flex-1 flex flex-col p-4 gap-4 animate-in">
+          <div
+            className="flex-col animate-in"
+            style={{ display: "flex", flex: 1, padding: "1rem", gap: "1rem" }}
+          >
+            <div
+              className="flex-col"
+              style={{
+                display: "flex",
+                gap: "0.25rem",
+                marginBottom: "0.5rem",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: "10px",
+                  fontWeight: 900,
+                  opacity: 0.5,
+                  textTransform: "uppercase",
+                  letterSpacing: "1px",
+                }}
+              >
+                Current Target
+              </span>
+              <p
+                style={{ fontWeight: 800, fontStyle: "italic", color: "white" }}
+              >
+                {currentClue}
+              </p>
+            </div>
+
             <div
               onTouchMove={handleTouchMove}
               onTouchEnd={() => {
                 lastTouchRef.current = null;
               }}
-              className="flex-[2] bg-white/5 rounded-[2.5rem] border-2 border-white/10 relative flex flex-col items-center justify-center active:border-primary/50 transition-colors shadow-inner"
+              className="touchpad"
+              style={{ margin: 0, position: "relative" }}
             >
-              <MousePointer2 className="text-white/10" size={64} />
-              <p className="text-white/20 text-[10px] font-black uppercase tracking-[0.4em] mt-4">
+              <MousePointer2 size={48} style={{ opacity: 0.1 }} />
+              <p
+                style={{
+                  position: "absolute",
+                  bottom: "2rem",
+                  fontSize: "10px",
+                  fontWeight: 900,
+                  opacity: 0.2,
+                  letterSpacing: "4px",
+                  textTransform: "uppercase",
+                }}
+              >
                 Touchpad
               </p>
+
               {lastResult === "HIT" && (
-                <div className="absolute inset-0 bg-green-500/10 rounded-[2.5rem] animate-pulse" />
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "rgba(16, 185, 129, 0.1)",
+                    borderRadius: "var(--radius-lg)",
+                    animation: "pulse-danger 0.5s",
+                  }}
+                />
               )}
               {lastResult === "MISS" && (
-                <div className="absolute inset-0 bg-accent/10 rounded-[2.5rem] animate-pulse" />
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "rgba(239, 68, 68, 0.1)",
+                    borderRadius: "var(--radius-lg)",
+                    animation: "pulse-danger 0.5s",
+                  }}
+                />
               )}
             </div>
 
@@ -408,22 +610,27 @@ const Controller = () => {
               onClick={() => {
                 if (status === "PLAYING") channelRef.current.emit("spotObject");
               }}
-              className={`flex-1 rounded-[2.5rem] flex flex-col items-center justify-center transition-all active:scale-95 shadow-2xl ${
-                lastResult === "HIT"
-                  ? "bg-green-500"
-                  : lastResult === "MISS"
-                    ? "bg-accent"
-                    : "bg-primary"
-              }`}
+              className="spot-btn"
+              style={{
+                margin: 0,
+                flex: "none",
+                height: "140px",
+                background:
+                  lastResult === "HIT"
+                    ? "var(--accent-success)"
+                    : lastResult === "MISS"
+                      ? "var(--accent-error)"
+                      : "var(--accent-primary)",
+              }}
             >
-              <Target className="text-white mb-2" size={40} />
-              <span className="text-white font-black text-2xl tracking-tighter uppercase italic">
-                SPOT OBJECT
-              </span>
+              <div className="flex flex-col items-center gap-1">
+                <Target size={32} />
+                <span>SPOT OBJECT</span>
+              </div>
             </button>
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 };

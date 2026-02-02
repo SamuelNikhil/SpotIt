@@ -56,7 +56,6 @@ const Screen = () => {
     });
 
     channel.on("roomReset", (finalResults) => {
-      // Show results for 3 seconds before switching back to QR
       setResults(finalResults);
       setStatus("RESULTS");
       setIsResetting(true);
@@ -74,7 +73,6 @@ const Screen = () => {
     });
 
     channel.on("lobbyUpdate", (state) => {
-      // Only update if we aren't in the middle of a reset transition
       if (state.teamName) setTeamName(state.teamName);
       if (state.status === "LOBBY") {
         setStatus("LOBBY");
@@ -117,7 +115,7 @@ const Screen = () => {
     });
 
     channel.on("spotFeedback", (data) => {
-      const { type, x, y, playerId, newScore, nextClue, isGameOver } = data;
+      const { type, x, y, playerId, newScore, nextClue } = data;
 
       if (type === "HIT") {
         setPlayers((prev) =>
@@ -149,53 +147,77 @@ const Screen = () => {
 
   if (status === "CONNECTING") {
     return (
-      <div className="min-h-screen bg-dark flex flex-col items-center justify-center text-white">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-primary mb-4"></div>
-        <p className="text-xl font-medium tracking-wide italic text-white/60">
+      <div className="screen-container items-center justify-center text-center">
+        <Target
+          size={64}
+          color="var(--accent-primary)"
+          style={{ marginBottom: "1rem" }}
+        />
+        <p className="logo-text" style={{ fontSize: "1.2rem", opacity: 0.6 }}>
           Initializing SpotIt...
         </p>
       </div>
     );
   }
 
+  const totalTeamScore = players.reduce((acc, p) => acc + p.score, 0);
+
   return (
-    <div className="min-h-screen bg-dark text-white overflow-hidden font-sans select-none">
-      <header className="h-20 bg-dark/50 backdrop-blur-md border-b border-white/10 flex items-center justify-between px-10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-primary/20">
-            <Target className="text-white" size={24} />
+    <div className="screen-container">
+      <header className="screen-header">
+        <div className="logo-container">
+          <div className="logo-icon">
+            <Target className="text-white" size={22} />
           </div>
-          <h1 className="text-3xl font-black tracking-tighter italic">
-            SPOTIT
-          </h1>
+          <h1 className="logo-text">SPOTIT</h1>
         </div>
 
-        <div className="flex items-center gap-8">
-          <div className="flex flex-col items-end mr-4">
-            <span className="text-[10px] font-black text-white/40 uppercase tracking-widest">
+        <div className="header-stats">
+          {/* Hide Team info on mobile if it's just the placeholder */}
+          <div
+            className="flex flex-col items-end mr-4"
+            style={{
+              display:
+                teamName === "Waiting for Team..."
+                  ? "var(--mobile-hide, flex)"
+                  : "flex",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "9px",
+                fontWeight: 900,
+                opacity: 0.4,
+                textTransform: "uppercase",
+                letterSpacing: "1.5px",
+              }}
+            >
               Team
             </span>
-            <span className="text-lg font-bold text-primary italic leading-none">
+            <span
+              style={{
+                fontSize: "1.1rem",
+                fontWeight: 800,
+                color: "var(--accent-primary)",
+                fontStyle: "italic",
+                lineHeight: 1,
+              }}
+            >
               {teamName}
             </span>
           </div>
-          <div className="flex items-center gap-2 bg-white/5 px-4 py-2 rounded-full border border-white/10">
-            <Users className="text-secondary" size={20} />
-            <span className="font-bold">{players.length} Players</span>
+
+          <div className="stat-badge">
+            <Users size={18} color="var(--accent-secondary)" />
+            <span>{players.length} Players</span>
           </div>
+
           {status === "PLAYING" && (
             <div
-              className={`flex items-center gap-2 px-4 py-2 rounded-full border border-white/5 animate-in ${timeLeft < 10 ? "bg-accent/20 border-accent/50" : "bg-white/5"}`}
+              className={`stat-badge ${timeLeft < 10 ? "timer-danger" : ""}`}
             >
-              <Timer
-                className={
-                  timeLeft < 10 ? "text-accent animate-pulse" : "text-accent"
-                }
-                size={20}
-              />
-              <span
-                className={`font-mono font-bold text-xl ${timeLeft < 10 ? "text-accent" : ""}`}
-              >
+              <Timer size={18} />
+              <span style={{ fontFamily: "monospace", fontSize: "1.1rem" }}>
                 {timeLeft}s
               </span>
             </div>
@@ -203,75 +225,108 @@ const Screen = () => {
         </div>
       </header>
 
-      <main className="flex h-[calc(100vh-80px)] p-8 gap-8">
-        <div className="flex-1 bg-white/5 rounded-[3rem] border border-white/10 relative overflow-hidden shadow-2xl flex items-center justify-center">
+      <main className="game-main">
+        <div className="canvas-area">
           {(status === "LOBBY" || status === "CONNECTED") && !isResetting ? (
-            <div className="flex flex-col items-center justify-center w-full h-full p-4">
-              <div className="bg-white p-4 rounded-[2rem] shadow-2xl animate-in mb-6 flex items-center justify-center shrink">
+            <div className="lobby-content">
+              <div className="qr-wrapper">
                 {roomId && (
-                  <QRCodeSVG
-                    value={getJoinUrl()}
-                    size={240}
-                    level={"M"}
-                    includeMargin={false}
-                  />
+                  <QRCodeSVG value={getJoinUrl()} size={220} level={"M"} />
                 )}
               </div>
-              <h2 className="text-5xl font-black mb-4 italic tracking-tighter uppercase">
-                SCAN TO JOIN
-              </h2>
-              <p className="text-white/40 text-lg uppercase tracking-[0.2em]">
+              <h2 className="lobby-title">SCAN TO JOIN</h2>
+              <p className="lobby-subtitle">
                 Team Leader sets name & starts game
               </p>
             </div>
           ) : status === "RESULTS" || isResetting ? (
-            <ScoreCard
-              teamName={results?.teamName}
-              score={results?.totalScore}
-              players={results?.players || []}
-              isLeader={players.find((p) => p.isLeader)?.isReady}
-              timeLeft={results?.timeLeft ?? timeLeft}
-              onRestart={() => channelRef.current?.emit("startGame")}
-              onExit={() => {
-                channelRef.current?.emit("exitRoom");
-              }}
-            />
+            <div className="scorecard-overlay">
+              <ScoreCard
+                teamName={results?.teamName}
+                score={results?.totalScore}
+                players={results?.players || []}
+                isLeader={players.find((p) => p.isLeader)?.isReady}
+                timeLeft={results?.timeLeft ?? timeLeft}
+                onRestart={() => channelRef.current?.emit("startGame")}
+                onExit={() => channelRef.current?.emit("exitRoom")}
+              />
+            </div>
           ) : (
             <div className="relative w-full h-full">
               <div
-                className="absolute inset-0 bg-cover bg-center transition-all duration-1000"
-                style={{ backgroundImage: `url(${currentImage.url})` }}
+                className="absolute w-full h-full"
+                style={{
+                  backgroundImage: `url(${currentImage.url})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                  transition: "all 1s ease",
+                }}
               >
-                <div className="absolute inset-0 bg-black/10" />
+                <div
+                  className="absolute w-full h-full"
+                  style={{ background: "rgba(0,0,0,0.15)" }}
+                />
               </div>
 
               {feedbacks.map((f) => (
                 <div
                   key={f.id}
-                  style={{ left: `${f.x}%`, top: `${f.y}%` }}
-                  className={`absolute -translate-x-1/2 -translate-y-1/2 w-20 h-20 border-8 rounded-full animate-ping duration-1000 z-10 ${
-                    f.type === "HIT" ? "border-green-500" : "border-accent"
-                  }`}
+                  className="ping-feedback"
+                  style={{
+                    left: `${f.x}%`,
+                    top: `${f.y}%`,
+                    borderColor:
+                      f.type === "HIT"
+                        ? "var(--accent-success)"
+                        : "var(--accent-error)",
+                  }}
                 />
               ))}
 
               {players.map((p, i) => (
                 <div
                   key={p.id}
-                  className="absolute transition-all duration-75 ease-out z-50 pointer-events-none"
-                  style={{ left: `${p.cursorX}%`, top: `${p.cursorY}%` }}
+                  className="absolute"
+                  style={{
+                    left: `${p.cursorX}%`,
+                    top: `${p.cursorY}%`,
+                    transition: "all 0.08s ease-out",
+                    zIndex: 50,
+                    pointerEvents: "none",
+                  }}
                 >
-                  <div className="relative -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
+                  <div
+                    className="relative"
+                    style={{ transform: "translate(-50%, -50%)" }}
+                  >
                     <div
-                      className={`w-14 h-14 border-4 rounded-full border-dashed animate-spin-slow ${
-                        i === 0
-                          ? "border-primary"
-                          : i === 1
-                            ? "border-secondary"
-                            : "border-accent"
-                      }`}
+                      style={{
+                        width: "44px",
+                        height: "44px",
+                        border: "3px dashed",
+                        borderRadius: "50%",
+                        borderColor:
+                          i === 0
+                            ? "var(--accent-primary)"
+                            : i === 1
+                              ? "var(--accent-secondary)"
+                              : "var(--accent-tertiary)",
+                        animation: "expressiveFloat 4s infinite linear",
+                      }}
                     />
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-white shadow-lg" />
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "50%",
+                        left: "50%",
+                        transform: "translate(-50%, -50%)",
+                        width: "6px",
+                        height: "6px",
+                        background: "white",
+                        borderRadius: "50%",
+                        boxShadow: "0 0 8px rgba(255,255,255,0.8)",
+                      }}
+                    />
                   </div>
                 </div>
               ))}
@@ -279,81 +334,174 @@ const Screen = () => {
           )}
         </div>
 
-        <aside className="w-80 flex flex-col">
+        <aside className="sidebar">
           {status === "PLAYING" ? (
-            <div className="bg-white/5 rounded-[2.5rem] border border-white/10 p-8 flex-1 shadow-xl flex flex-col animate-in">
-              <div className="flex items-center gap-3 mb-8">
-                <HelpCircle className="text-primary" size={28} />
-                <h3 className="text-2xl font-black italic tracking-tight uppercase text-white/80">
+            <div
+              className="glass-card flex-col h-full"
+              style={{ display: "flex", flex: 1, padding: "1.5rem" }}
+            >
+              <div className="flex items-center gap-2 mb-4">
+                <HelpCircle color="var(--accent-primary)" size={24} />
+                <h3
+                  style={{
+                    fontSize: "1.25rem",
+                    fontWeight: 900,
+                    fontStyle: "italic",
+                  }}
+                >
                   THE CLUE
                 </h3>
               </div>
-              <div className="bg-white/5 rounded-3xl p-6 border border-white/10 flex-1 flex flex-col items-center justify-center text-center">
-                <Sparkles className="text-primary/40 mb-4" size={48} />
-                <p className="text-2xl font-black leading-tight italic">
+
+              <div className="clue-box">
+                <Sparkles
+                  style={{ opacity: 0.2, marginBottom: "1rem" }}
+                  size={40}
+                  color="var(--accent-primary)"
+                />
+                <p
+                  style={{
+                    fontSize: "1.5rem",
+                    fontWeight: 900,
+                    fontStyle: "italic",
+                    lineHeight: 1.2,
+                  }}
+                >
                   "{currentClue}"
                 </p>
               </div>
-              <div className="mt-8 pt-8 border-t border-white/10">
-                <div className="flex justify-between items-center mb-2 text-white/40">
-                  <span className="text-[10px] font-black uppercase tracking-widest">
+
+              <div className="progress-container">
+                <div className="flex justify-between items-center mb-2">
+                  <span
+                    style={{
+                      fontSize: "9px",
+                      fontWeight: 900,
+                      opacity: 0.5,
+                      letterSpacing: "1px",
+                    }}
+                  >
                     PROGRESS
                   </span>
-                  <span className="text-primary font-mono font-bold">
-                    {players.reduce((acc, p) => acc + p.score, 0)} Pts
+                  <span
+                    style={{
+                      color: "var(--accent-primary)",
+                      fontWeight: 900,
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    {totalTeamScore} Pts
                   </span>
                 </div>
-                <div className="w-full h-3 bg-white/5 rounded-full overflow-hidden border border-white/10 p-[2px]">
+                <div
+                  style={{
+                    height: "10px",
+                    background: "rgba(255,255,255,0.05)",
+                    borderRadius: "99px",
+                    border: "1px solid var(--glass-border)",
+                    padding: "2px",
+                  }}
+                >
                   <div
-                    className="h-full bg-primary rounded-full transition-all duration-500"
                     style={{
-                      width: `${Math.min(100, (players.reduce((acc, p) => acc + p.score, 0) / 100) * 100)}%`,
+                      height: "100%",
+                      background: "var(--accent-primary)",
+                      borderRadius: "99px",
+                      transition: "width 0.5s ease",
+                      width: `${Math.min(100, (totalTeamScore / 100) * 100)}%`,
                     }}
                   />
                 </div>
               </div>
             </div>
           ) : (
-            <div className="bg-white/5 rounded-[2.5rem] border border-white/10 p-8 flex-1 shadow-xl flex flex-col animate-in">
-              <div className="flex items-center gap-3 mb-8">
-                <Trophy className="text-yellow-400" size={28} />
-                <h3 className="text-2xl font-black italic tracking-tight uppercase">
+            <div className="glass-card leaderboard-container">
+              <div className="flex items-center gap-2 mb-6">
+                <Trophy color="#facc15" size={24} />
+                <h3
+                  style={{
+                    fontSize: "1.25rem",
+                    fontWeight: 900,
+                    fontStyle: "italic",
+                  }}
+                >
                   LEADERBOARD
                 </h3>
               </div>
-              <div className="space-y-4 flex-1 overflow-y-auto no-scrollbar">
-                {players
-                  .sort((a, b) => b.score - a.score)
-                  .map((p, i) => (
-                    <div
-                      key={p.id}
-                      className="flex items-center justify-between p-5 bg-white/5 rounded-3xl border border-white/5"
-                    >
-                      <div className="flex items-center gap-4">
-                        <span className="text-white/30 font-black italic text-xl">
-                          #0{i + 1}
-                        </span>
-                        <span className="font-bold text-lg truncate max-w-[100px]">
-                          {p.name}
-                        </span>
-                      </div>
-                      <div className="flex flex-col items-end">
-                        <span className="font-mono font-black text-2xl text-primary">
-                          {p.score}
-                        </span>
-                        {p.isReady && (
-                          <span className="text-[10px] text-green-400 font-black uppercase">
-                            Ready
+              <div className="leaderboard-list no-scrollbar">
+                {players.length > 0 ? (
+                  players
+                    .sort((a, b) => b.score - a.score)
+                    .map((p, i) => (
+                      <div key={p.id} className="leaderboard-item">
+                        <div className="flex items-center gap-3">
+                          <span
+                            style={{
+                              opacity: 0.3,
+                              fontWeight: 900,
+                              fontStyle: "italic",
+                            }}
+                          >
+                            #0{i + 1}
                           </span>
-                        )}
+                          <span
+                            style={{
+                              fontWeight: 700,
+                              maxWidth: "100px",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {p.name}
+                          </span>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          <span
+                            style={{
+                              color: "var(--accent-primary)",
+                              fontWeight: 900,
+                              fontFamily: "monospace",
+                              fontSize: "1.1rem",
+                            }}
+                          >
+                            {p.score}
+                          </span>
+                          {p.isReady && (
+                            <span
+                              style={{
+                                fontSize: "8px",
+                                color: "var(--accent-success)",
+                                fontWeight: 900,
+                              }}
+                            >
+                              READY
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                {players.length === 0 && (
-                  <div className="text-center py-20 opacity-20 flex flex-col items-center justify-center h-full">
-                    <Users size={48} className="mb-4" />
-                    <p className="font-bold uppercase tracking-widest text-sm text-center leading-tight">
-                      Waiting for Team...
+                    ))
+                ) : (
+                  <div
+                    className="flex-col items-center justify-center text-center opacity-20"
+                    style={{
+                      display:
+                        teamName === "Waiting for Team..."
+                          ? "var(--mobile-hide, flex)"
+                          : "flex",
+                      flex: 1,
+                      padding: "2rem 0",
+                    }}
+                  >
+                    <Users size={40} style={{ marginBottom: "0.5rem" }} />
+                    <p
+                      style={{
+                        fontSize: "0.7rem",
+                        fontWeight: 800,
+                        letterSpacing: "1px",
+                      }}
+                    >
+                      WAITING FOR TEAM...
                     </p>
                   </div>
                 )}

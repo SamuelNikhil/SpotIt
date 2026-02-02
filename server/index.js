@@ -6,12 +6,13 @@ import helmet from "helmet";
 import { randomBytes } from "crypto";
 
 /**
- * SPOTIT AUTHORITATIVE SERVER - v3.3
+ * SPOTIT AUTHORITATIVE SERVER - v3.5
  *
  * Features:
- * - Room reset logic with 3-second results delay.
- * - Authoritative scoring and hit detection.
- * - Persistent Room & Player state management.
+ * - Persistent Room & Player State.
+ * - Score preservation during disconnect grace periods.
+ * - Server-side 30s Game Timer.
+ * - Team Leader identification and room management.
  */
 
 const app = express();
@@ -26,6 +27,8 @@ const io = geckos({
 io.addServer(server);
 
 const ROOMS = new Map();
+const DISCONNECT_TIMEOUTS = new Map();
+
 const GAME_CONFIG = {
   ROUND_TIME: 30,
   POINTS_PER_HIT: 20,
@@ -79,6 +82,7 @@ const IMAGE_DATABASE = [
 function generateRoomId() {
   return randomBytes(3).toString("hex").toUpperCase();
 }
+
 function generateToken() {
   return randomBytes(16).toString("hex");
 }
@@ -92,12 +96,17 @@ function isHit(clickX, clickY, targetHotspot) {
   return dist <= targetHotspot.radius;
 }
 
+/**
+ * Broadcasts the current lobby state to the screen and active players.
+ */
 function broadcastLobbyState(room) {
   if (!room) return;
   const playersArray = Array.from(room.players.values());
-  const readyCount = playersArray.filter((p) => p.isReady).length;
-  const totalPlayers = playersArray.length;
-  const allReady = totalPlayers > 0 && playersArray.every((p) => p.isReady);
+  const activePlayers = playersArray.filter((p) => p.connected);
+
+  const readyCount = activePlayers.filter((p) => p.isReady).length;
+  const totalPlayers = activePlayers.length;
+  const allReady = totalPlayers > 0 && activePlayers.every((p) => p.isReady);
 
   const state = {
     allReady,
@@ -108,7 +117,7 @@ function broadcastLobbyState(room) {
   };
 
   if (room.screenChannel) room.screenChannel.emit("lobbyUpdate", state);
-  playersArray.forEach((p) => p.channel?.emit("lobbyUpdate", state));
+  activePlayers.forEach((p) => p.channel?.emit("lobbyUpdate", state));
 }
 
 function startGameTimer(room) {
@@ -117,9 +126,12 @@ function startGameTimer(room) {
 
   room.timerInterval = setInterval(() => {
     room.timeLeft--;
+
     const timeData = { timeLeft: room.timeLeft };
     room.screenChannel?.emit("timerUpdate", timeData);
-    room.players.forEach((p) => p.channel?.emit("timerUpdate", timeData));
+    room.players.forEach((p) => {
+      if (p.connected) p.channel?.emit("timerUpdate", timeData);
+    });
 
     if (room.timeLeft <= 0) {
       clearInterval(room.timerInterval);
@@ -132,14 +144,12 @@ function endGame(room, reason) {
   room.status = "RESULTS";
   if (room.timerInterval) clearInterval(room.timerInterval);
 
+  const playersArray = Array.from(room.players.values());
   const results = {
     reason,
     teamName: room.teamName,
-    totalScore: Array.from(room.players.values()).reduce(
-      (acc, p) => acc + p.score,
-      0,
-    ),
-    players: Array.from(room.players.values()).map((p) => ({
+    totalScore: playersArray.reduce((acc, p) => acc + p.score, 0),
+    players: playersArray.map((p) => ({
       name: p.name,
       score: p.score,
     })),
@@ -147,33 +157,35 @@ function endGame(room, reason) {
   };
 
   room.screenChannel?.emit("gameOver", results);
-  room.players.forEach((p) => p.channel?.emit("gameOver", results));
+  playersArray.forEach((p) => {
+    if (p.connected) p.channel?.emit("gameOver", results);
+  });
 }
 
 function resetRoomState(room) {
   if (room.timerInterval) clearInterval(room.timerInterval);
 
-  // Calculate final results to show on screen before destruction
+  const playersArray = Array.from(room.players.values());
   const results = {
     teamName: room.teamName,
-    totalScore: Array.from(room.players.values()).reduce(
-      (acc, p) => acc + p.score,
-      0,
-    ),
-    players: Array.from(room.players.values()).map((p) => ({
+    totalScore: playersArray.reduce((acc, p) => acc + p.score, 0),
+    players: playersArray.map((p) => ({
       name: p.name,
       score: p.score,
     })),
     timeLeft: room.timeLeft,
   };
 
-  // Tell screen to show results for 3 seconds then go to QR
+  // Tell screen to show results (it will handle the 3s delay)
   room.screenChannel?.emit("roomReset", results);
 
-  // Tell all players to exit immediately
-  room.players.forEach((p) => p.channel?.emit("exited"));
+  // Tell all connected players to exit
+  playersArray.forEach((p) => {
+    if (p.connected) p.channel?.emit("exited");
+  });
 
   ROOMS.delete(room.id);
+  DISCONNECT_TIMEOUTS.delete(room.id);
   console.log(`[Room Reset] ${room.id}`);
 }
 
@@ -197,7 +209,7 @@ io.onConnection((channel) => {
       id: roomId,
       token: token,
       screenChannel: channel,
-      players: new Map(),
+      players: new Map(), // channelId -> player object
       teamName: null,
       currentImage: IMAGE_DATABASE[0],
       currentHotspotIndex: 0,
@@ -222,20 +234,28 @@ io.onConnection((channel) => {
         error: "Invalid Room",
       });
 
+    // Cancel deletion if leader or any player is reconnecting
+    if (DISCONNECT_TIMEOUTS.has(roomId)) {
+      clearTimeout(DISCONNECT_TIMEOUTS.get(roomId));
+      DISCONNECT_TIMEOUTS.delete(roomId);
+      console.log(`[Reconnect] Grace period cancelled for ${roomId}`);
+    }
+
     const isLeader = room.players.size === 0;
     if (isLeader && teamName) {
       room.teamName = teamName;
-      room.screenChannel.emit("teamUpdated", { teamName });
+      room.screenChannel?.emit("teamUpdated", { teamName });
     }
 
     const playerObj = {
       id: channel.id,
       channel: channel,
       name: isLeader
-        ? room.teamName || "Leader"
+        ? room.teamName || teamName || "Leader"
         : `Member ${room.players.size + 1}`,
       isLeader: isLeader,
       isReady: isLeader,
+      connected: true,
       score: 0,
       cursorX: 50,
       cursorY: 50,
@@ -249,7 +269,7 @@ io.onConnection((channel) => {
       isLeader,
       teamName: room.teamName,
     });
-    room.screenChannel.emit("playerJoined", {
+    room.screenChannel?.emit("playerJoined", {
       id: playerObj.id,
       name: playerObj.name,
       isLeader,
@@ -277,13 +297,13 @@ io.onConnection((channel) => {
 
     room.status = "PLAYING";
     room.currentHotspotIndex = 0;
-    room.players.forEach((p) => (p.score = 0));
+    room.players.forEach((p) => (p.score = 0)); // Reset all scores
 
     const firstClue = room.currentImage.hotspots[0].clue;
     room.screenChannel?.emit("gameStarted", { clue: firstClue });
-    room.players.forEach((p) =>
-      p.channel?.emit("gameStarted", { clue: firstClue }),
-    );
+    room.players.forEach((p) => {
+      if (p.connected) p.channel?.emit("gameStarted", { clue: firstClue });
+    });
     startGameTimer(room);
   });
 
@@ -295,7 +315,7 @@ io.onConnection((channel) => {
     if (player) {
       player.cursorX = data.x;
       player.cursorY = data.y;
-      room.screenChannel.emit(
+      room.screenChannel?.emit(
         "cursorMoved",
         { playerId: channel.id, x: data.x, y: data.y },
         { reliable: false },
@@ -309,6 +329,8 @@ io.onConnection((channel) => {
     if (!room || room.status !== "PLAYING") return;
 
     const player = room.players.get(channel.id);
+    if (!player) return;
+
     const target = room.currentImage.hotspots[room.currentHotspotIndex];
 
     if (isHit(player.cursorX, player.cursorY, target)) {
@@ -330,19 +352,20 @@ io.onConnection((channel) => {
         nextClue,
         isGameOver,
       };
-      room.screenChannel.emit("spotFeedback", feedback);
-      room.players.forEach((p) =>
-        p.channel?.emit("spotResult", {
-          success: true,
-          points: GAME_CONFIG.POINTS_PER_HIT,
-          nextClue,
-          isGameOver,
-        }),
-      );
+      room.screenChannel?.emit("spotFeedback", feedback);
+      room.players.forEach((p) => {
+        if (p.connected)
+          p.channel?.emit("spotResult", {
+            success: true,
+            points: GAME_CONFIG.POINTS_PER_HIT,
+            nextClue,
+            isGameOver,
+          });
+      });
 
       if (isGameOver) endGame(room, "COMPLETE");
     } else {
-      room.screenChannel.emit("spotFeedback", {
+      room.screenChannel?.emit("spotFeedback", {
         type: "MISS",
         playerId: channel.id,
         x: player.cursorX,
@@ -374,9 +397,30 @@ io.onConnection((channel) => {
     if (!room) return;
 
     const player = room.players.get(channel.id);
-    if (role === "screen" || player?.isLeader) {
+    if (role === "screen") {
       resetRoomState(room);
-    } else {
+    } else if (player?.isLeader) {
+      console.log(
+        `[Disconnect] Leader left ${roomId}. Starting 10s grace period.`,
+      );
+      player.connected = false; // Keep player in map to preserve score
+      room.screenChannel?.emit("playerLeft", { id: channel.id });
+      broadcastLobbyState(room);
+
+      const timeoutId = setTimeout(() => {
+        if (ROOMS.has(roomId)) {
+          const r = ROOMS.get(roomId);
+          const currentLeader = Array.from(r.players.values()).find(
+            (p) => p.isLeader,
+          );
+          if (currentLeader && !currentLeader.connected) {
+            console.log(`[Timeout] Leader failed to return. Resetting.`);
+            resetRoomState(r);
+          }
+        }
+      }, 10000);
+      DISCONNECT_TIMEOUTS.set(roomId, timeoutId);
+    } else if (player) {
       room.players.delete(channel.id);
       room.screenChannel?.emit("playerLeft", { id: channel.id });
       broadcastLobbyState(room);

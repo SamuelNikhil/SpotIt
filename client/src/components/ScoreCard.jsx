@@ -1,44 +1,217 @@
-import React from 'react';
-import { Trophy, Star, Users, ArrowRight } from 'lucide-react';
+import React from "react";
+import { Trophy, Star, Users, ArrowRight } from "lucide-react";
 
-const ScoreCard = ({ teamName, score, players, onRestart, onExit, isLeader, isGameOver, timeLeft }) => {
+const ScoreCard = ({
+  teamName,
+  score,
+  players,
+  onRestart,
+  onExit,
+  isLeader,
+  timeLeft,
+}) => {
   return (
-    <div className="bg-white/5 backdrop-blur-xl rounded-[3rem] border border-white/10 p-10 shadow-2xl max-w-2xl w-full animate-in flex flex-col items-center text-center">
+    <div
+      className="animate-in no-scrollbar"
+      style={{
+        padding: "2.5rem",
+        maxWidth: "550px",
+        width: "95%",
+        textAlign: "center",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        maxHeight: "90vh",
+        overflowY: "auto",
+        gap: "1.5rem",
+        position: "relative",
+        zIndex: 100,
+        background: "transparent",
+        border: "none",
+        boxShadow: "none",
+      }}
+    >
       {/* Header Icon */}
-      <div className="w-24 h-24 bg-yellow-400/20 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-yellow-400/10">
-        <Trophy className="text-yellow-400" size={48} />
+      <div
+        style={{
+          width: "70px",
+          height: "70px",
+          background: "rgba(250, 204, 21, 0.1)",
+          borderRadius: "50%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          boxShadow: "0 0 30px rgba(250, 204, 21, 0.1)",
+        }}
+      >
+        <Trophy size={36} color="#facc15" />
       </div>
 
-      {/* Game Status Text */}
-      <h2 className="text-5xl font-black italic tracking-tighter mb-2 uppercase text-white">
-        {timeLeft === 0 ? "TIME'S UP!" : "CHALLENGE COMPLETE!"}
-      </h2>
-      <p className="text-white/40 font-black uppercase tracking-[0.3em] mb-8">
-        Team Results
-      </p>
+      {/* Status Text */}
+      <div style={{ flexShrink: 0 }}>
+        <h2
+          style={{
+            fontSize: "clamp(1.5rem, 6vh, 3rem)",
+            fontWeight: 900,
+            fontStyle: "italic",
+            letterSpacing: "-1px",
+            textTransform: "uppercase",
+            marginBottom: "0.25rem",
+            color: "white",
+            lineHeight: 1,
+          }}
+        >
+          {timeLeft === 0 ? "Time's Up!" : "Complete!"}
+        </h2>
+        <p
+          style={{
+            fontSize: "9px",
+            fontWeight: 900,
+            textTransform: "uppercase",
+            letterSpacing: "3px",
+            opacity: 0.4,
+          }}
+        >
+          Mission Briefing
+        </p>
+      </div>
 
-      {/* Team & Score Main Display */}
-      <div className="bg-white/5 rounded-3xl p-8 border border-white/5 w-full mb-8">
-        <h3 className="text-primary text-sm font-black uppercase tracking-widest mb-1">Team Name</h3>
-        <p className="text-4xl font-black text-white italic mb-6">{teamName}</p>
+      {/* Main Results Panel */}
+      <div
+        style={{
+          width: "100%",
+          background: "rgba(255, 255, 255, 0.03)",
+          borderRadius: "24px",
+          padding: "1.5rem",
+          border: "1px solid rgba(255, 255, 255, 0.12)",
+          display: "flex",
+          flexDirection: "column",
+          gap: "1.25rem",
+        }}
+      >
+        <div>
+          <span
+            style={{
+              fontSize: "10px",
+              fontWeight: 800,
+              color: "var(--accent-primary)",
+              textTransform: "uppercase",
+              letterSpacing: "1px",
+              display: "block",
+              marginBottom: "0.25rem",
+            }}
+          >
+            Team Name
+          </span>
+          <p
+            style={{
+              fontSize: "1.75rem",
+              fontWeight: 900,
+              fontStyle: "italic",
+              color: "white",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {teamName || "Spotters"}
+          </p>
+        </div>
 
-        <div className="h-px bg-white/10 w-full mb-6" />
+        <div
+          style={{
+            height: "1px",
+            background: "rgba(255, 255, 255, 0.12)",
+            width: "100%",
+          }}
+        />
 
-        <div className="flex justify-around items-center">
-          <div className="flex flex-col">
-            <span className="text-white/40 text-[10px] font-black uppercase tracking-widest">Total Points</span>
-            <span className="text-5xl font-black text-primary font-mono">{score}</span>
-          </div>
-          <div className="flex flex-col border-l border-white/10 pl-12 text-left">
-            <span className="text-white/40 text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-1">
-              <Users size={12} /> Players
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "0 0.5rem",
+          }}
+        >
+          <div style={{ textAlign: "left" }}>
+            <span
+              style={{
+                fontSize: "9px",
+                fontWeight: 900,
+                opacity: 0.4,
+                textTransform: "uppercase",
+                letterSpacing: "1px",
+                display: "block",
+              }}
+            >
+              Total Score
             </span>
-            <div className="flex -space-x-2">
-              {players.map((p, i) => (
-                <div key={i} className={`w-8 h-8 rounded-full border-2 border-dark flex items-center justify-center text-[10px] font-bold ${
-                  i === 0 ? 'bg-primary' : i === 1 ? 'bg-secondary' : 'bg-accent'
-                }`}>
-                  {p.name.charAt(0)}
+            <span
+              style={{
+                fontSize: "clamp(2.5rem, 5vh, 4rem)",
+                fontWeight: 900,
+                color: "var(--accent-primary)",
+                fontFamily: "monospace",
+                lineHeight: 1,
+              }}
+            >
+              {score}
+            </span>
+          </div>
+
+          <div
+            style={{
+              width: "1px",
+              height: "40px",
+              background: "rgba(255, 255, 255, 0.12)",
+            }}
+          />
+
+          <div style={{ textAlign: "right" }}>
+            <span
+              style={{
+                fontSize: "9px",
+                fontWeight: 900,
+                opacity: 0.4,
+                textTransform: "uppercase",
+                letterSpacing: "1px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "flex-end",
+                gap: "4px",
+                marginBottom: "6px",
+              }}
+            >
+              <Users size={10} /> Players
+            </span>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              {players?.map((p, i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: "28px",
+                    height: "28px",
+                    borderRadius: "50%",
+                    background:
+                      i === 0
+                        ? "var(--accent-primary)"
+                        : i === 1
+                          ? "var(--accent-secondary)"
+                          : "var(--accent-tertiary)",
+                    border: "2px solid var(--bg-dark)",
+                    marginLeft: i === 0 ? 0 : "-8px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "9px",
+                    fontWeight: 900,
+                    color: i === 2 ? "var(--bg-dark)" : "white",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                  }}
+                >
+                  {p.name.charAt(0).toUpperCase()}
                 </div>
               ))}
             </div>
@@ -46,29 +219,79 @@ const ScoreCard = ({ teamName, score, players, onRestart, onExit, isLeader, isGa
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="flex flex-col w-full gap-4">
+      {/* Interactive Controls */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.75rem",
+          width: "100%",
+          flexShrink: 0,
+        }}
+      >
         {isLeader ? (
           <button
             onClick={onRestart}
-            id="restart-btn"
-            className="group relative w-full bg-white text-dark py-6 rounded-2xl font-black text-xl flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-xl"
+            className="spot-btn"
+            style={{
+              margin: 0,
+              padding: "1rem",
+              background: "white",
+              color: "var(--bg-dark)",
+              fontSize: "1.2rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "10px",
+              width: "100%",
+              height: "auto",
+              flex: "none",
+            }}
           >
-            <Star className="text-primary group-hover:rotate-12 transition-transform" />
-            PLAY AGAIN
+            <Star
+              fill="var(--accent-primary)"
+              color="var(--accent-primary)"
+              size={20}
+            />
+            <span>PLAY AGAIN</span>
           </button>
         ) : (
-          <div className="py-4 text-white/40 font-bold animate-pulse italic">
-            Waiting for Leader to Restart...
+          <div
+            style={{
+              padding: "1rem",
+              borderRadius: "20px",
+              background: "rgba(255, 255, 255, 0.02)",
+              color: "rgba(255, 255, 255, 0.3)",
+              fontWeight: 800,
+              fontStyle: "italic",
+              fontSize: "0.85rem",
+            }}
+          >
+            Waiting for leader to restart...
           </div>
         )}
 
         <button
           onClick={onExit}
-          className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-2 transition-all active:scale-95"
+          style={{
+            background: "none",
+            border: "1px solid rgba(255, 255, 255, 0.12)",
+            color: "white",
+            padding: "0.75rem",
+            borderRadius: "20px",
+            fontWeight: 800,
+            fontSize: "0.85rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px",
+            cursor: "pointer",
+            opacity: 0.5,
+            transition: "all 0.2s",
+            width: "100%",
+          }}
         >
-          EXIT TO LOBBY
-          <ArrowRight size={20} />
+          EXIT TO LOBBY <ArrowRight size={16} />
         </button>
       </div>
     </div>
