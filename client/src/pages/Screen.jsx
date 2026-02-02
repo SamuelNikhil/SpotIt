@@ -18,7 +18,7 @@ const Screen = () => {
   const [teamName, setTeamName] = useState("Waiting for Team...");
   const [status, setStatus] = useState("CONNECTING"); // CONNECTING, LOBBY, PLAYING, RESULTS
   const [currentImage, setCurrentImage] = useState({
-    url: "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=2000",
+    url: "https://images.unsplash.com/photo-1497215728101-856f4ea42174?q=80&w=2000",
   });
   const [currentClue, setCurrentClue] = useState("");
   const [timeLeft, setTimeLeft] = useState(30);
@@ -47,10 +47,9 @@ const Screen = () => {
       channel.emit("createRoom");
     });
 
-    channel.on("roomCreated", ({ roomId, token, image }) => {
+    channel.on("roomCreated", ({ roomId, token }) => {
       setRoomId(roomId);
       setJoinToken(token);
-      if (image) setCurrentImage(image);
       setStatus("LOBBY");
       setIsResetting(false);
     });
@@ -87,16 +86,19 @@ const Screen = () => {
     channel.on("playerJoined", (player) => {
       setPlayers((prev) => [
         ...prev,
-        { ...player, score: 0, cursorX: 50, cursorY: 50 },
+        { ...player, score: 0, cursorX: 50, cursorY: 50, connected: true },
       ]);
     });
 
     channel.on("playerLeft", ({ id }) => {
-      setPlayers((prev) => prev.filter((p) => p.id !== id));
+      setPlayers((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, connected: false } : p)),
+      );
     });
 
-    channel.on("gameStarted", ({ clue }) => {
+    channel.on("gameStarted", ({ clue, image }) => {
       setCurrentClue(clue);
+      if (image) setCurrentImage(image);
       setStatus("PLAYING");
       setResults(null);
       setTimeLeft(30);
@@ -115,13 +117,14 @@ const Screen = () => {
     });
 
     channel.on("spotFeedback", (data) => {
-      const { type, x, y, playerId, newScore, nextClue } = data;
+      const { type, x, y, playerId, newScore, nextClue, newImage } = data;
 
       if (type === "HIT") {
         setPlayers((prev) =>
           prev.map((p) => (p.id === playerId ? { ...p, score: newScore } : p)),
         );
         if (nextClue) setCurrentClue(nextClue);
+        if (newImage) setCurrentImage(newImage);
       }
 
       const feedbackId = Math.random().toString(36).substr(2, 9);
@@ -160,7 +163,7 @@ const Screen = () => {
     );
   }
 
-  const totalTeamScore = players.reduce((acc, p) => acc + p.score, 0);
+  const totalTeamScore = players.reduce((acc, p) => acc + (p.score || 0), 0);
 
   return (
     <div className="screen-container">
@@ -173,7 +176,6 @@ const Screen = () => {
         </div>
 
         <div className="header-stats">
-          {/* Hide Team info on mobile if it's just the placeholder */}
           <div
             className="flex flex-col items-end mr-4"
             style={{
@@ -209,7 +211,7 @@ const Screen = () => {
 
           <div className="stat-badge">
             <Users size={18} color="var(--accent-secondary)" />
-            <span>{players.length} Players</span>
+            <span>{players.filter((p) => p.connected).length} Players</span>
           </div>
 
           {status === "PLAYING" && (
@@ -245,7 +247,7 @@ const Screen = () => {
                 teamName={results?.teamName}
                 score={results?.totalScore}
                 players={results?.players || []}
-                isLeader={players.find((p) => p.isLeader)?.isReady}
+                isLeader={players.find((p) => p.isLeader)?.connected}
                 timeLeft={results?.timeLeft ?? timeLeft}
                 onRestart={() => channelRef.current?.emit("startGame")}
                 onExit={() => channelRef.current?.emit("exitRoom")}
@@ -293,6 +295,7 @@ const Screen = () => {
                     transition: "all 0.08s ease-out",
                     zIndex: 50,
                     pointerEvents: "none",
+                    display: p.connected ? "block" : "none",
                   }}
                 >
                   <div
@@ -372,7 +375,7 @@ const Screen = () => {
               </div>
 
               <div className="progress-container">
-                <div className="flex justify-between items-center mb-2">
+                <div className="flex justify-between items-center mb-2 text-white/40">
                   <span
                     style={{
                       fontSize: "9px",
@@ -408,7 +411,7 @@ const Screen = () => {
                       background: "var(--accent-primary)",
                       borderRadius: "99px",
                       transition: "width 0.5s ease",
-                      width: `${Math.min(100, (totalTeamScore / 100) * 100)}%`,
+                      width: `${Math.min(100, (totalTeamScore / 1000) * 100)}%`,
                     }}
                   />
                 </div>
@@ -431,7 +434,7 @@ const Screen = () => {
               <div className="leaderboard-list no-scrollbar">
                 {players.length > 0 ? (
                   players
-                    .sort((a, b) => b.score - a.score)
+                    .sort((a, b) => (b.score || 0) - (a.score || 0))
                     .map((p, i) => (
                       <div key={p.id} className="leaderboard-item">
                         <div className="flex items-center gap-3">
@@ -465,9 +468,9 @@ const Screen = () => {
                               fontSize: "1.1rem",
                             }}
                           >
-                            {p.score}
+                            {p.score || 0}
                           </span>
-                          {p.isReady && (
+                          {p.isReady && p.connected && (
                             <span
                               style={{
                                 fontSize: "8px",
@@ -476,6 +479,17 @@ const Screen = () => {
                               }}
                             >
                               READY
+                            </span>
+                          )}
+                          {!p.connected && (
+                            <span
+                              style={{
+                                fontSize: "8px",
+                                color: "var(--accent-error)",
+                                fontWeight: 900,
+                              }}
+                            >
+                              AWAY
                             </span>
                           )}
                         </div>

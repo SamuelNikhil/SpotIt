@@ -6,13 +6,12 @@ import helmet from "helmet";
 import { randomBytes } from "crypto";
 
 /**
- * SPOTIT AUTHORITATIVE SERVER - v3.5
+ * SPOTIT AUTHORITATIVE SERVER - v4.3
  *
- * Features:
- * - Persistent Room & Player State.
- * - Score preservation during disconnect grace periods.
- * - Server-side 30s Game Timer.
- * - Team Leader identification and room management.
+ * Fixes:
+ * - Larger hit radii for easier spotting.
+ * - Robust image loading on restart.
+ * - Fixed broken Unsplash URLs.
  */
 
 const app = express();
@@ -30,107 +29,171 @@ const ROOMS = new Map();
 const DISCONNECT_TIMEOUTS = new Map();
 
 const GAME_CONFIG = {
-  ROUND_TIME: 30,
+  LEVEL_TIME: 30,
   POINTS_PER_HIT: 20,
+  MAX_RIDDLES: 8,
 };
 
+// --- IMAGE & RIDDLE DATABASE ---
 const IMAGE_DATABASE = [
   {
-    id: "test_circuit",
-    url: "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=2000",
-    difficulty: "low",
+    id: "easy_office",
+    url: "https://images.unsplash.com/photo-1497215728101-856f4ea42174?q=80&w=2000",
     hotspots: [
       {
-        id: "chip",
-        x: 50.0,
-        y: 50.0,
-        radius: 8,
-        clue: "Find the main Central Processor Chip",
+        id: "monitor",
+        x: 50,
+        y: 35,
+        radius: 18, // Increased
+        clue: "I am the big Screen on the desk. I show you the pictures.",
       },
       {
-        id: "capacitor",
-        x: 23.5,
-        y: 18.2,
-        radius: 6,
-        clue: "Locate the tall Blue Capacitor",
+        id: "keyboard",
+        x: 50,
+        y: 75,
+        radius: 15, // Increased
+        clue: "I am full of letters and keys. Use me to type.",
       },
       {
-        id: "resistor",
-        x: 78.2,
-        y: 82.5,
-        radius: 7,
-        clue: "Find the cluster of resistors at the bottom",
+        id: "mouse",
+        x: 72,
+        y: 80,
+        radius: 12, // Increased
+        clue: "I sit next to the keys. Click me to move the pointer.",
       },
       {
-        id: "connector",
-        x: 10.5,
-        y: 45.0,
-        radius: 5,
-        clue: "Spot the silver connector on the left edge",
+        id: "coffee",
+        x: 75,
+        y: 65,
+        radius: 10, // Increased
+        clue: "I am a white mug filled with a hot morning drink.",
       },
       {
-        id: "led",
-        x: 85.0,
-        y: 25.0,
-        radius: 5,
-        clue: "Find the Green Status LED on the right",
+        id: "lamp",
+        x: 15,
+        y: 30,
+        radius: 12, // Increased
+        clue: "I am the light on the left side of the desk.",
+      },
+    ],
+  },
+  {
+    id: "luxury_kitchen",
+    url: "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?q=80&w=2000",
+    hotspots: [
+      {
+        id: "stove",
+        x: 32,
+        y: 65,
+        radius: 18,
+        clue: "I am the master of fire. I turn raw ingredients into a feast.",
+      },
+      {
+        id: "kettle",
+        x: 18,
+        y: 52,
+        radius: 12,
+        clue: "I scream when I'm ready for tea. I dance with the steam.",
+      },
+      {
+        id: "fridge",
+        x: 85,
+        y: 40,
+        radius: 20,
+        clue: "I am the winter in a box. I keep your secret snacks cold.",
+      },
+      {
+        id: "sink",
+        x: 55,
+        y: 68,
+        radius: 15,
+        clue: "I swallow water and wash your dirty dishes.",
+      },
+      {
+        id: "clock",
+        x: 50,
+        y: 12,
+        radius: 10,
+        clue: "I have hands but no body. I tell you when the feast is ready.",
       },
     ],
   },
 ];
 
+// --- HELPERS ---
 function generateRoomId() {
   return randomBytes(3).toString("hex").toUpperCase();
 }
-
 function generateToken() {
   return randomBytes(16).toString("hex");
 }
-
-function isHit(clickX, clickY, targetHotspot) {
-  if (!targetHotspot) return false;
-  const dist = Math.sqrt(
-    Math.pow(clickX - targetHotspot.x, 2) +
-      Math.pow(clickY - targetHotspot.y, 2),
-  );
-  return dist <= targetHotspot.radius;
+function isHit(x, y, target) {
+  if (!target) return false;
+  const dist = Math.sqrt(Math.pow(x - target.x, 2) + Math.pow(y - target.y, 2));
+  return dist <= target.radius;
 }
 
-/**
- * Broadcasts the current lobby state to the screen and active players.
- */
 function broadcastLobbyState(room) {
   if (!room) return;
   const playersArray = Array.from(room.players.values());
   const activePlayers = playersArray.filter((p) => p.connected);
-
-  const readyCount = activePlayers.filter((p) => p.isReady).length;
-  const totalPlayers = activePlayers.length;
-  const allReady = totalPlayers > 0 && activePlayers.every((p) => p.isReady);
-
   const state = {
-    allReady,
-    readyCount,
-    totalPlayers,
+    allReady: activePlayers.length > 0 && activePlayers.every((p) => p.isReady),
+    readyCount: activePlayers.filter((p) => p.isReady).length,
+    totalPlayers: activePlayers.length,
     teamName: room.teamName || "",
     status: room.status,
   };
-
   if (room.screenChannel) room.screenChannel.emit("lobbyUpdate", state);
   activePlayers.forEach((p) => p.channel?.emit("lobbyUpdate", state));
 }
 
+function selectLevelData(room) {
+  const teamScore = Array.from(room.players.values()).reduce(
+    (acc, p) => acc + p.score,
+    0,
+  );
+
+  // Difficulty Logic
+  let riddleCount = 3;
+  if (teamScore >= 200) riddleCount = 5;
+  else if (teamScore >= 100) riddleCount = 4;
+  riddleCount = Math.min(GAME_CONFIG.MAX_RIDDLES, riddleCount);
+
+  // Pick image
+  let nextImage;
+  if (!room.currentImage) {
+    nextImage = IMAGE_DATABASE[0];
+  } else {
+    // Pick a different one if possible
+    const otherImages = IMAGE_DATABASE.filter(
+      (img) => img.id !== room.currentImage.id,
+    );
+    nextImage =
+      otherImages.length > 0
+        ? otherImages[Math.floor(Math.random() * otherImages.length)]
+        : IMAGE_DATABASE[0];
+  }
+
+  room.currentImage = nextImage;
+  const shuffled = [...nextImage.hotspots].sort(() => 0.5 - Math.random());
+  room.currentHotspots = shuffled.slice(0, riddleCount);
+  room.currentHotspotIndex = 0;
+  console.log(
+    `[LEVEL] Room ${room.id} -> Image: ${nextImage.id} | Riddles: ${riddleCount}`,
+  );
+}
+
 function startGameTimer(room) {
   if (room.timerInterval) clearInterval(room.timerInterval);
-  room.timeLeft = GAME_CONFIG.ROUND_TIME;
+  room.timeLeft = GAME_CONFIG.LEVEL_TIME;
 
   room.timerInterval = setInterval(() => {
     room.timeLeft--;
-
     const timeData = { timeLeft: room.timeLeft };
     room.screenChannel?.emit("timerUpdate", timeData);
     room.players.forEach((p) => {
-      if (p.connected) p.channel?.emit("timerUpdate", timeData);
+      if (p.connected) p.channel.emit("timerUpdate", timeData);
     });
 
     if (room.timeLeft <= 0) {
@@ -143,63 +206,49 @@ function startGameTimer(room) {
 function endGame(room, reason) {
   room.status = "RESULTS";
   if (room.timerInterval) clearInterval(room.timerInterval);
-
   const playersArray = Array.from(room.players.values());
   const results = {
     reason,
     teamName: room.teamName,
     totalScore: playersArray.reduce((acc, p) => acc + p.score, 0),
-    players: playersArray.map((p) => ({
-      name: p.name,
-      score: p.score,
-    })),
-    timeLeft: room.timeLeft,
+    players: playersArray.map((p) => ({ name: p.name, score: p.score })),
+    timeLeft: 0,
   };
-
   room.screenChannel?.emit("gameOver", results);
   playersArray.forEach((p) => {
-    if (p.connected) p.channel?.emit("gameOver", results);
+    if (p.connected) p.channel.emit("gameOver", results);
   });
 }
 
 function resetRoomState(room) {
   if (room.timerInterval) clearInterval(room.timerInterval);
-
   const playersArray = Array.from(room.players.values());
   const results = {
     teamName: room.teamName,
     totalScore: playersArray.reduce((acc, p) => acc + p.score, 0),
-    players: playersArray.map((p) => ({
-      name: p.name,
-      score: p.score,
-    })),
+    players: playersArray.map((p) => ({ name: p.name, score: p.score })),
     timeLeft: room.timeLeft,
   };
-
-  // Tell screen to show results (it will handle the 3s delay)
   room.screenChannel?.emit("roomReset", results);
-
-  // Tell all connected players to exit
   playersArray.forEach((p) => {
-    if (p.connected) p.channel?.emit("exited");
+    if (p.connected) p.channel.emit("exited");
   });
-
   ROOMS.delete(room.id);
   DISCONNECT_TIMEOUTS.delete(room.id);
   console.log(`[Room Reset] ${room.id}`);
 }
 
+// --- SOCKET CONNECTION ---
 io.onConnection((channel) => {
   console.log(`[Connect] ${channel.id}`);
 
   channel.on("probeRoom", ({ roomId }) => {
     const room = ROOMS.get(roomId);
-    if (room) {
+    if (room)
       channel.emit("roomInfo", {
         teamName: room.teamName,
         status: room.status,
       });
-    }
   });
 
   channel.on("createRoom", () => {
@@ -209,21 +258,19 @@ io.onConnection((channel) => {
       id: roomId,
       token: token,
       screenChannel: channel,
-      players: new Map(), // channelId -> player object
+      players: new Map(),
       teamName: null,
-      currentImage: IMAGE_DATABASE[0],
+      currentImage: null,
+      currentHotspots: [],
       currentHotspotIndex: 0,
       status: "LOBBY",
-      timeLeft: GAME_CONFIG.ROUND_TIME,
+      timeLeft: GAME_CONFIG.LEVEL_TIME,
       timerInterval: null,
     };
     ROOMS.set(roomId, roomState);
     channel.userData = { role: "screen", roomId };
-    channel.emit("roomCreated", {
-      roomId,
-      token,
-      image: { url: roomState.currentImage.url },
-    });
+    channel.emit("roomCreated", { roomId, token });
+    console.log(`[Created] ${roomId}`);
   });
 
   channel.on("joinRoom", ({ roomId, token, teamName }) => {
@@ -234,11 +281,9 @@ io.onConnection((channel) => {
         error: "Invalid Room",
       });
 
-    // Cancel deletion if leader or any player is reconnecting
     if (DISCONNECT_TIMEOUTS.has(roomId)) {
       clearTimeout(DISCONNECT_TIMEOUTS.get(roomId));
       DISCONNECT_TIMEOUTS.delete(roomId);
-      console.log(`[Reconnect] Grace period cancelled for ${roomId}`);
     }
 
     const isLeader = room.players.size === 0;
@@ -251,9 +296,9 @@ io.onConnection((channel) => {
       id: channel.id,
       channel: channel,
       name: isLeader
-        ? room.teamName || teamName || "Leader"
+        ? room.teamName || teamName
         : `Member ${room.players.size + 1}`,
-      isLeader: isLeader,
+      isLeader,
       isReady: isLeader,
       connected: true,
       score: 0,
@@ -263,7 +308,6 @@ io.onConnection((channel) => {
 
     room.players.set(channel.id, playerObj);
     channel.userData = { role: "controller", roomId };
-
     channel.emit("joinResponse", {
       success: true,
       isLeader,
@@ -273,6 +317,7 @@ io.onConnection((channel) => {
       id: playerObj.id,
       name: playerObj.name,
       isLeader,
+      connected: true,
     });
     broadcastLobbyState(room);
   });
@@ -280,11 +325,12 @@ io.onConnection((channel) => {
   channel.on("setReady", () => {
     const { roomId } = channel.userData || {};
     const room = ROOMS.get(roomId);
-    if (!room) return;
-    const player = room.players.get(channel.id);
-    if (player) {
-      player.isReady = true;
-      broadcastLobbyState(room);
+    if (room) {
+      const p = room.players.get(channel.id);
+      if (p) {
+        p.isReady = true;
+        broadcastLobbyState(room);
+      }
     }
   });
 
@@ -295,14 +341,23 @@ io.onConnection((channel) => {
     const player = room.players.get(channel.id);
     if (!player || !player.isLeader) return;
 
+    console.log(`[Start] Game starting in room ${roomId}`);
     room.status = "PLAYING";
-    room.currentHotspotIndex = 0;
-    room.players.forEach((p) => (p.score = 0)); // Reset all scores
+    room.players.forEach((p) => (p.score = 0));
 
-    const firstClue = room.currentImage.hotspots[0].clue;
-    room.screenChannel?.emit("gameStarted", { clue: firstClue });
+    // Always pick fresh level data on start/restart
+    selectLevelData(room);
+
+    const firstClue = room.currentHotspots[0].clue;
+    const imgData = { url: room.currentImage.url };
+
+    room.screenChannel?.emit("gameStarted", {
+      clue: firstClue,
+      image: imgData,
+    });
     room.players.forEach((p) => {
-      if (p.connected) p.channel?.emit("gameStarted", { clue: firstClue });
+      if (p.connected)
+        p.channel.emit("gameStarted", { clue: firstClue, image: imgData });
     });
     startGameTimer(room);
   });
@@ -310,16 +365,17 @@ io.onConnection((channel) => {
   channel.on("cursorUpdate", (data) => {
     const { roomId } = channel.userData || {};
     const room = ROOMS.get(roomId);
-    if (!room) return;
-    const player = room.players.get(channel.id);
-    if (player) {
-      player.cursorX = data.x;
-      player.cursorY = data.y;
-      room.screenChannel?.emit(
-        "cursorMoved",
-        { playerId: channel.id, x: data.x, y: data.y },
-        { reliable: false },
-      );
+    if (room) {
+      const p = room.players.get(channel.id);
+      if (p) {
+        p.cursorX = data.x;
+        p.cursorY = data.y;
+        room.screenChannel?.emit(
+          "cursorMoved",
+          { playerId: channel.id, x: data.x, y: data.y },
+          { reliable: false },
+        );
+      }
     }
   });
 
@@ -327,49 +383,54 @@ io.onConnection((channel) => {
     const { roomId } = channel.userData || {};
     const room = ROOMS.get(roomId);
     if (!room || room.status !== "PLAYING") return;
+    const p = room.players.get(channel.id);
+    if (!p) return;
 
-    const player = room.players.get(channel.id);
-    if (!player) return;
-
-    const target = room.currentImage.hotspots[room.currentHotspotIndex];
-
-    if (isHit(player.cursorX, player.cursorY, target)) {
-      player.score += GAME_CONFIG.POINTS_PER_HIT;
+    const target = room.currentHotspots[room.currentHotspotIndex];
+    if (isHit(p.cursorX, p.cursorY, target)) {
+      p.score += GAME_CONFIG.POINTS_PER_HIT;
       room.currentHotspotIndex++;
+      const isLevelOver =
+        room.currentHotspotIndex >= room.currentHotspots.length;
 
-      const isGameOver =
-        room.currentHotspotIndex >= room.currentImage.hotspots.length;
-      const nextClue = isGameOver
-        ? null
-        : room.currentImage.hotspots[room.currentHotspotIndex].clue;
-
-      const feedback = {
-        type: "HIT",
-        playerId: channel.id,
-        x: player.cursorX,
-        y: player.cursorY,
-        newScore: player.score,
-        nextClue,
-        isGameOver,
-      };
-      room.screenChannel?.emit("spotFeedback", feedback);
-      room.players.forEach((p) => {
-        if (p.connected)
-          p.channel?.emit("spotResult", {
-            success: true,
-            points: GAME_CONFIG.POINTS_PER_HIT,
-            nextClue,
-            isGameOver,
-          });
-      });
-
-      if (isGameOver) endGame(room, "COMPLETE");
+      if (isLevelOver) {
+        selectLevelData(room);
+        const nextClue = room.currentHotspots[0].clue;
+        const feedback = {
+          type: "HIT",
+          playerId: channel.id,
+          x: p.cursorX,
+          y: p.cursorY,
+          newScore: p.score,
+          nextClue,
+          newImage: { url: room.currentImage.url },
+        };
+        room.screenChannel?.emit("spotFeedback", feedback);
+        room.players.forEach((plr) => {
+          if (plr.connected) plr.channel.emit("spotResult", feedback);
+        });
+        startGameTimer(room);
+      } else {
+        const nextClue = room.currentHotspots[room.currentHotspotIndex].clue;
+        const feedback = {
+          type: "HIT",
+          playerId: channel.id,
+          x: p.cursorX,
+          y: p.cursorY,
+          newScore: p.score,
+          nextClue,
+        };
+        room.screenChannel?.emit("spotFeedback", feedback);
+        room.players.forEach((plr) => {
+          if (plr.connected) plr.channel.emit("spotResult", feedback);
+        });
+      }
     } else {
       room.screenChannel?.emit("spotFeedback", {
         type: "MISS",
         playerId: channel.id,
-        x: player.cursorX,
-        y: player.cursorY,
+        x: p.cursorX,
+        y: p.cursorY,
       });
       channel.emit("spotResult", { success: false });
     }
@@ -378,16 +439,15 @@ io.onConnection((channel) => {
   channel.on("exitRoom", () => {
     const { role, roomId } = channel.userData || {};
     const room = ROOMS.get(roomId);
-    if (!room) return;
-
-    const player = room.players.get(channel.id);
-    if (player?.isLeader || role === "screen") {
-      resetRoomState(room);
-    } else {
-      room.players.delete(channel.id);
-      room.screenChannel?.emit("playerLeft", { id: channel.id });
-      broadcastLobbyState(room);
-      channel.emit("exited");
+    if (room) {
+      const p = room.players.get(channel.id);
+      if (p?.isLeader || role === "screen") resetRoomState(room);
+      else {
+        room.players.delete(channel.id);
+        room.screenChannel?.emit("playerLeft", { id: channel.id });
+        broadcastLobbyState(room);
+        channel.emit("exited");
+      }
     }
   });
 
@@ -395,32 +455,21 @@ io.onConnection((channel) => {
     const { role, roomId } = channel.userData || {};
     const room = ROOMS.get(roomId);
     if (!room) return;
-
-    const player = room.players.get(channel.id);
-    if (role === "screen") {
-      resetRoomState(room);
-    } else if (player?.isLeader) {
-      console.log(
-        `[Disconnect] Leader left ${roomId}. Starting 10s grace period.`,
-      );
-      player.connected = false; // Keep player in map to preserve score
+    const p = room.players.get(channel.id);
+    if (role === "screen") resetRoomState(room);
+    else if (p?.isLeader) {
+      p.connected = false;
       room.screenChannel?.emit("playerLeft", { id: channel.id });
       broadcastLobbyState(room);
-
       const timeoutId = setTimeout(() => {
-        if (ROOMS.has(roomId)) {
-          const r = ROOMS.get(roomId);
-          const currentLeader = Array.from(r.players.values()).find(
-            (p) => p.isLeader,
-          );
-          if (currentLeader && !currentLeader.connected) {
-            console.log(`[Timeout] Leader failed to return. Resetting.`);
-            resetRoomState(r);
-          }
+        const r = ROOMS.get(roomId);
+        if (r) {
+          const leader = Array.from(r.players.values()).find((l) => l.isLeader);
+          if (leader && !leader.connected) resetRoomState(r);
         }
       }, 10000);
       DISCONNECT_TIMEOUTS.set(roomId, timeoutId);
-    } else if (player) {
+    } else if (p) {
       room.players.delete(channel.id);
       room.screenChannel?.emit("playerLeft", { id: channel.id });
       broadcastLobbyState(room);
@@ -429,4 +478,6 @@ io.onConnection((channel) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`SpotIt Server running on port ${PORT}`));
+server.listen(PORT, () =>
+  console.log(`SpotIt v4.3 Server running on port ${PORT}`),
+);
