@@ -7,10 +7,15 @@ export default defineConfig(({ mode }) => {
   const serverUrl = env.VITE_SERVER_URL || "http://localhost";
   const serverPort = env.VITE_SERVER_PORT || "3000";
 
-  // Construct target for proxying signaling requests (matches SlingShot-game proxy logic)
-  const target = serverUrl.match(/:\d+/)
+  // Ensure protocol is present for the proxy target
+  const formattedUrl = serverUrl.startsWith("http")
     ? serverUrl
-    : `${serverUrl.replace(/\/$/, "")}:${serverPort}`;
+    : `http://${serverUrl}`;
+
+  // Construct target for proxying signaling requests
+  const target = formattedUrl.match(/:\d+/)
+    ? formattedUrl
+    : `${formattedUrl.replace(/\/$/, "")}:${serverPort}`;
 
   return {
     plugins: [react()],
