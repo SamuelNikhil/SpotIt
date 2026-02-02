@@ -1,0 +1,19 @@
+{
+  "name": "spotit-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Authoritative game server for SpotIt",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "build": "npm rebuild node-datachannel"
+  },
+  "dependencies": {
+    "@geckos.io/server": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.18.2",
+    "helmet": "^8.0.0"
+  }
+}
