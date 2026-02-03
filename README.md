@@ -43,7 +43,6 @@ The client runs on `http://localhost:5173`.
 1. Upload the `server` folder to your hosting provider.
 2. Create a `.env` file in the `server` directory:
    ```env
-   PORT=3000
    ALLOWED_ORIGIN=https://your-frontend-domain.com
    ```
 3. Install dependencies and start:
