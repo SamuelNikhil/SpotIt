@@ -286,6 +286,7 @@ io.onConnection((channel) => {
     playersArray.forEach(p => {
       channel.emit(EVENTS.PLAYER_JOINED, {
         id: p.id,
+        persistentId: p.persistentId,
         name: p.name,
         isLeader: p.isLeader,
         connected: p.connected,
@@ -348,7 +349,11 @@ io.onConnection((channel) => {
     }
 
     if (playerObj) {
-      // Restore existing player
+      // Restore existing player - clear any pending disconnect timeout
+      if (DISCONNECT_TIMEOUTS.has(playerObj.persistentId)) {
+        clearTimeout(DISCONNECT_TIMEOUTS.get(playerObj.persistentId));
+        DISCONNECT_TIMEOUTS.delete(playerObj.persistentId);
+      }
       playerObj.id = channel.id;
       playerObj.channel = channel;
       playerObj.connected = true;
@@ -397,6 +402,7 @@ io.onConnection((channel) => {
 
     room.screenChannel?.emit(EVENTS.PLAYER_JOINED, {
       id: playerObj.id,
+      persistentId: playerObj.persistentId,
       name: playerObj.name,
       isLeader: playerObj.isLeader,
       connected: true,
@@ -562,9 +568,25 @@ io.onConnection((channel) => {
       }, 10000);
       DISCONNECT_TIMEOUTS.set(roomId, timeoutId);
     } else if (p) {
-      room.players.delete(channel.id);
-      room.screenChannel?.emit(EVENTS.PLAYER_LEFT, { id: channel.id });
+      // Mark as disconnected but keep for reconnection (don't delete immediately)
+      p.connected = false;
+      p.channel = null; // Clear the old channel reference
+      room.screenChannel?.emit(EVENTS.PLAYER_LEFT, { id: channel.id, disconnected: true });
       broadcastLobbyState(room);
+      
+      // Set timeout to fully remove player after 60 seconds if they don't reconnect
+      const timeoutId = setTimeout(() => {
+        const r = ROOMS.get(roomId);
+        if (r) {
+          const player = Array.from(r.players.values()).find((pl) => pl.persistentId === p.persistentId);
+          if (player && !player.connected) {
+            r.players.delete(player.id);
+            r.screenChannel?.emit(EVENTS.PLAYER_LEFT, { id: player.id, removed: true });
+            broadcastLobbyState(r);
+          }
+        }
+      }, 60000);
+      DISCONNECT_TIMEOUTS.set(p.persistentId, timeoutId);
     }
   });
 });

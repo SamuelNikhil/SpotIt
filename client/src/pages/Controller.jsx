@@ -83,6 +83,8 @@ const Controller = () => {
 
     channel.onDisconnect(() => {
       setStatus(GAME_STATUS.CONNECTING);
+      // Don't clear localStorage on disconnect - keep it for reconnection
+      // The session data will be cleared on proper exit or room reset
     });
 
     channel.on(EVENTS.ROOM_INFO, (data) => {

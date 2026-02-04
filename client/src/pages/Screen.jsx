@@ -113,9 +113,13 @@ const Screen = () => {
 
     channel.on(EVENTS.PLAYER_JOINED, (player) => {
       setPlayers((prev) => {
-        // Avoid duplicates during recovery
-        if (prev.find(p => p.id === player.id)) {
-          return prev.map(p => p.id === player.id ? { ...p, ...player, connected: true } : p);
+        // Check if player already exists (by id or persistentId for reconnection)
+        const existingIndex = prev.findIndex(p => p.id === player.id || (player.persistentId && p.persistentId === player.persistentId));
+        if (existingIndex >= 0) {
+          // Update existing player
+          return prev.map((p, idx) => 
+            idx === existingIndex ? { ...p, ...player, connected: true } : p
+          );
         }
         return [
           ...prev,
@@ -124,10 +128,15 @@ const Screen = () => {
       });
     });
 
-    channel.on(EVENTS.PLAYER_LEFT, ({ id }) => {
-      setPlayers((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, connected: false } : p)),
-      );
+    channel.on(EVENTS.PLAYER_LEFT, ({ id, disconnected, removed }) => {
+      setPlayers((prev) => {
+        if (removed) {
+          // Player fully removed after timeout
+          return prev.filter((p) => p.id !== id);
+        }
+        // Mark as disconnected (for reconnection)
+        return prev.map((p) => (p.id === id ? { ...p, connected: false } : p));
+      });
     });
 
     channel.on(EVENTS.GAME_STARTED, ({ clue, image }) => {
