@@ -1,0 +1,7 @@
+{
+  "name": "spotit-root",
+  "private": true,
+  "scripts": {
+    "sync-shared": "powershell -Command \"Copy-Item -Path 'shared/constants.js' -Destination 'client/src/constants.js' -Force; Copy-Item -Path 'shared/constants.js' -Destination 'server/constants.js' -Force; Copy-Item -Path 'shared/utils.js' -Destination 'client/src/utils/sharedUtils.js' -Force; Copy-Item -Path 'shared/utils.js' -Destination 'server/utils.js' -Force\""
+  }
+}
