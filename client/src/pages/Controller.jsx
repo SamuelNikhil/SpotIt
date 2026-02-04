@@ -118,8 +118,7 @@ const Controller = () => {
           }
         } else {
           setStatus(GAME_STATUS.LOBBY);
-        }true);
-        setStatus(GAME_STATUS.LOBBY);
+        }
       } else {
         const sessionKey = "spotit_session_" + roomId;
         localStorage.removeItem(sessionKey);
