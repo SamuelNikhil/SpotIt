@@ -11,13 +11,14 @@ import {
 } from "lucide-react";
 import ScoreCard from "../components/ScoreCard";
 import { getServerConfig } from "../utils/network";
+import { GAME_STATUS, EVENTS } from "../constants";
 
 const Screen = () => {
   const [roomId, setRoomId] = useState(null);
   const [joinToken, setJoinToken] = useState(null);
   const [players, setPlayers] = useState([]);
   const [teamName, setTeamName] = useState("Waiting for Team...");
-  const [status, setStatus] = useState("CONNECTING"); // CONNECTING, LOBBY, PLAYING, RESULTS
+  const [status, setStatus] = useState(GAME_STATUS.CONNECTING); // CONNECTING, LOBBY, PLAYING, RESULTS
   const [currentImage, setCurrentImage] = useState({
     url: "https://images.unsplash.com/photo-1497215728101-856f4ea42174?q=80&w=2000",
   });
@@ -26,6 +27,7 @@ const Screen = () => {
   const [feedbacks, setFeedbacks] = useState([]);
   const [results, setResults] = useState(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [preloadedImage, setPreloadedImage] = useState(null);
 
   const channelRef = useRef(null);
 
@@ -43,72 +45,104 @@ const Screen = () => {
     channel.onConnect((error) => {
       if (error) return;
       channelRef.current = channel;
-      setStatus("CONNECTED");
-      channel.emit("createRoom");
+      
+      // Try to recover room from localStorage
+      const savedRoomId = localStorage.getItem("spotit_roomId");
+      const savedToken = localStorage.getItem("spotit_token");
+
+      if (savedRoomId && savedToken) {
+        console.log("[Recovery] Attempting to recover room:", savedRoomId);
+        channel.emit(EVENTS.RECOVER_ROOM, { roomId: savedRoomId, token: savedToken });
+      } else {
+        setStatus(GAME_STATUS.CONNECTED);
+        channel.emit(EVENTS.CREATE_ROOM);
+      }
     });
 
-    channel.on("roomCreated", ({ roomId, token }) => {
+    channel.on(EVENTS.ROOM_CREATED, ({ roomId, token, recovered }) => {
       setRoomId(roomId);
       setJoinToken(token);
-      setStatus("LOBBY");
+      localStorage.setItem("spotit_roomId", roomId);
+      localStorage.setItem("spotit_token", token);
+      setStatus(GAME_STATUS.LOBBY);
       setIsResetting(false);
+      if (recovered) {
+        console.log("[Recovery] Room recovered successfully");
+      }
     });
 
-    channel.on("roomReset", (finalResults) => {
+    channel.on(EVENTS.JOIN_RESPONSE, (res) => {
+      if (!res.success && res.error.includes("Room not found")) {
+        console.log("[Recovery] Failed to recover room, creating new one");
+        localStorage.removeItem("spotit_roomId");
+        localStorage.removeItem("spotit_token");
+        channel.emit(EVENTS.CREATE_ROOM);
+      }
+    });
+
+    channel.on(EVENTS.ROOM_RESET, (finalResults) => {
       setResults(finalResults);
-      setStatus("RESULTS");
+      setStatus(GAME_STATUS.RESULTS);
       setIsResetting(true);
+      localStorage.removeItem("spotit_roomId");
+      localStorage.removeItem("spotit_token");
 
       setTimeout(() => {
         setResults(null);
         setPlayers([]);
         setTeamName("Waiting for Team...");
-        setStatus("LOBBY");
+        setStatus(GAME_STATUS.LOBBY);
         setIsResetting(false);
         if (channelRef.current) {
-          channelRef.current.emit("createRoom");
+          channelRef.current.emit(EVENTS.CREATE_ROOM);
         }
       }, 3000);
     });
 
-    channel.on("lobbyUpdate", (state) => {
+    channel.on(EVENTS.LOBBY_UPDATE, (state) => {
       if (state.teamName) setTeamName(state.teamName);
-      if (state.status === "LOBBY") {
-        setStatus("LOBBY");
+      if (state.status === GAME_STATUS.LOBBY) {
+        setStatus(GAME_STATUS.LOBBY);
         setResults(null);
       }
     });
 
-    channel.on("teamUpdated", ({ teamName }) => {
+    channel.on(EVENTS.TEAM_UPDATED, ({ teamName }) => {
       setTeamName(teamName);
     });
 
-    channel.on("playerJoined", (player) => {
-      setPlayers((prev) => [
-        ...prev,
-        { ...player, score: 0, cursorX: 50, cursorY: 50, connected: true },
-      ]);
+    channel.on(EVENTS.PLAYER_JOINED, (player) => {
+      setPlayers((prev) => {
+        // Avoid duplicates during recovery
+        if (prev.find(p => p.id === player.id)) {
+          return prev.map(p => p.id === player.id ? { ...p, ...player, connected: true } : p);
+        }
+        return [
+          ...prev,
+          { ...player, score: 0, cursorX: 50, cursorY: 50, connected: true },
+        ];
+      });
     });
 
-    channel.on("playerLeft", ({ id }) => {
+    channel.on(EVENTS.PLAYER_LEFT, ({ id }) => {
       setPlayers((prev) =>
         prev.map((p) => (p.id === id ? { ...p, connected: false } : p)),
       );
     });
 
-    channel.on("gameStarted", ({ clue, image }) => {
+    channel.on(EVENTS.GAME_STARTED, ({ clue, image }) => {
       setCurrentClue(clue);
       if (image) setCurrentImage(image);
-      setStatus("PLAYING");
+      setStatus(GAME_STATUS.PLAYING);
       setResults(null);
       setTimeLeft(30);
     });
 
-    channel.on("timerUpdate", ({ timeLeft }) => {
+    channel.on(EVENTS.TIMER_UPDATE, ({ timeLeft }) => {
       setTimeLeft(timeLeft);
     });
 
-    channel.on("cursorMoved", ({ playerId, x, y }) => {
+    channel.on(EVENTS.CURSOR_MOVED, ({ playerId, x, y }) => {
       setPlayers((prev) =>
         prev.map((p) =>
           p.id === playerId ? { ...p, cursorX: x, cursorY: y } : p,
@@ -116,7 +150,7 @@ const Screen = () => {
       );
     });
 
-    channel.on("spotFeedback", (data) => {
+    channel.on(EVENTS.SPOT_FEEDBACK, (data) => {
       const { type, x, y, playerId, newScore, nextClue, newImage } = data;
 
       if (type === "HIT") {
@@ -134,9 +168,17 @@ const Screen = () => {
       }, 1000);
     });
 
-    channel.on("gameOver", (gameResults) => {
+    channel.on(EVENTS.GAME_OVER, (gameResults) => {
       setResults(gameResults);
-      setStatus("RESULTS");
+      setStatus(GAME_STATUS.RESULTS);
+    });
+
+    channel.on(EVENTS.PRELOAD_IMAGE, ({ url }) => {
+      // Create a hidden image to trigger browser caching
+      const img = new Image();
+      img.src = url;
+      setPreloadedImage(url);
+      console.log("[Preload] Caching next image:", url);
     });
 
     return () => {
@@ -148,7 +190,7 @@ const Screen = () => {
     return `${window.location.origin}/join/${roomId}/${joinToken}`;
   };
 
-  if (status === "CONNECTING") {
+  if (status === GAME_STATUS.CONNECTING) {
     return (
       <div className="screen-container items-center justify-center text-center">
         <Target
@@ -214,7 +256,7 @@ const Screen = () => {
             <span>{players.filter((p) => p.connected).length} Players</span>
           </div>
 
-          {status === "PLAYING" && (
+          {status === GAME_STATUS.PLAYING && (
             <div
               className={`stat-badge ${timeLeft < 10 ? "timer-danger" : ""}`}
             >
@@ -229,33 +271,14 @@ const Screen = () => {
 
       <main className="game-main">
         <div className="canvas-area">
-          {(status === "LOBBY" || status === "CONNECTED") && !isResetting ? (
-            <div className="lobby-content">
-              <div className="qr-wrapper">
-                {roomId && (
-                  <QRCodeSVG value={getJoinUrl()} size={220} level={"M"} />
-                )}
-              </div>
-              <h2 className="lobby-title">SCAN TO JOIN</h2>
-              <p className="lobby-subtitle">
-                Team Leader sets name & starts game
-              </p>
-            </div>
-          ) : status === "RESULTS" || isResetting ? (
-            <div className="scorecard-overlay">
-              <ScoreCard
-                teamName={results?.teamName}
-                score={results?.totalScore}
-                players={results?.players || []}
-                isLeader={players.find((p) => p.isLeader)?.connected}
-                timeLeft={results?.timeLeft ?? timeLeft}
-                onRestart={() => channelRef.current?.emit("startGame")}
-                onExit={() => channelRef.current?.emit("exitRoom")}
-              />
-            </div>
-          ) : (
-            <div className="relative w-full h-full">
-              <div
+          {status === GAME_STATUS.PLAYING ? (
+            <div className="relative w-full h-full">              {preloadedImage && (
+                <img
+                  src={preloadedImage}
+                  style={{ display: "none" }}
+                  alt="preload-cache"
+                />
+              )}              <div
                 className="absolute w-full h-full"
                 style={{
                   backgroundImage: `url(${currentImage.url})`,
@@ -334,11 +357,35 @@ const Screen = () => {
                 </div>
               ))}
             </div>
+          ) : (status === GAME_STATUS.LOBBY || status === GAME_STATUS.CONNECTED) && !isResetting ? (
+            <div className="lobby-content">
+              <div className="qr-wrapper">
+                {roomId && (
+                  <QRCodeSVG value={getJoinUrl()} size={220} level={"M"} />
+                )}
+              </div>
+              <h2 className="lobby-title">SCAN TO JOIN</h2>
+              <p className="lobby-subtitle">
+                Team Leader sets name & starts game
+              </p>
+            </div>
+          ) : (
+            <div className="scorecard-overlay">
+              <ScoreCard
+                teamName={results?.teamName}
+                score={results?.totalScore}
+                players={results?.players || []}
+                isLeader={players.find((p) => p.isLeader)?.connected}
+                timeLeft={results?.timeLeft ?? timeLeft}
+                onRestart={() => channelRef.current?.emit(EVENTS.START_GAME)}
+                onExit={() => channelRef.current?.emit(EVENTS.EXIT_ROOM)}
+              />
+            </div>
           )}
         </div>
 
         <aside className="sidebar">
-          {status === "PLAYING" ? (
+          {status === GAME_STATUS.PLAYING ? (
             <div
               className="glass-card flex-col h-full"
               style={{ display: "flex", flex: 1, padding: "1.5rem" }}

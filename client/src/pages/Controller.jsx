@@ -12,13 +12,15 @@ import {
   Timer as TimerIcon,
 } from "lucide-react";
 import { getServerConfig } from "../utils/network";
+import { GAME_STATUS, EVENTS } from "../constants";
+import { sanitizeInput } from "../utils/sharedUtils";
 
 /**
  * SPOTIT CONTROLLER COMPONENT
  */
 const Controller = () => {
   const { roomId, token } = useParams();
-  const [status, setStatus] = useState("CONNECTING");
+  const [status, setStatus] = useState(GAME_STATUS.CONNECTING);
   const [error, setError] = useState(null);
 
   const [isLeader, setIsLeader] = useState(false);
@@ -59,35 +61,35 @@ const Controller = () => {
       }
       channelRef.current = channel;
       setError(null);
-      channel.emit("probeRoom", { roomId });
+      channel.emit(EVENTS.PROBE_ROOM, { roomId });
 
       const sessionKey = "spotit_session_" + roomId;
       const savedData = localStorage.getItem(sessionKey);
       if (savedData) {
         try {
           const parsed = JSON.parse(savedData);
-          channel.emit("joinRoom", {
+          channel.emit(EVENTS.JOIN_ROOM, {
             roomId,
             token,
-            teamName: parsed.teamName,
+            playerId: parsed.playerId, // Send saved playerId
           });
         } catch (e) {
-          setStatus("JOINING");
+          setStatus(GAME_STATUS.JOINING);
         }
       } else {
-        setStatus("JOINING");
+        setStatus(GAME_STATUS.JOINING);
       }
     });
 
     channel.onDisconnect(() => {
-      setStatus("CONNECTING");
+      setStatus(GAME_STATUS.CONNECTING);
     });
 
-    channel.on("roomInfo", (data) => {
+    channel.on(EVENTS.ROOM_INFO, (data) => {
       if (data && data.teamName) setTeamName(data.teamName);
     });
 
-    channel.on("joinResponse", (res) => {
+    channel.on(EVENTS.JOIN_RESPONSE, (res) => {
       if (res.success) {
         setIsLeader(!!res.isLeader);
         if (res.teamName) {
@@ -95,38 +97,55 @@ const Controller = () => {
           const sessionKey = "spotit_session_" + roomId;
           localStorage.setItem(
             sessionKey,
-            JSON.stringify({ teamName: res.teamName }),
+            JSON.stringify({ 
+              teamName: res.teamName,
+              playerId: res.playerId // Save persistent playerId
+            }),
           );
         }
         setHasJoined(true);
         if (res.isLeader) setIsReady(true);
-        setStatus("LOBBY");
+        
+        // Handle Reconnection to active game
+        if (res.gameState) {
+          if (res.gameState.status === GAME_STATUS.PLAYING) {
+            setScore(res.gameState.score || 0);
+            setCurrentClue(res.gameState.currentClue || "");
+            setTimeLeft(res.gameState.timeLeft || 30);
+            setStatus(GAME_STATUS.PLAYING);
+          } else {
+            setStatus(GAME_STATUS.LOBBY);
+          }
+        } else {
+          setStatus(GAME_STATUS.LOBBY);
+        }true);
+        setStatus(GAME_STATUS.LOBBY);
       } else {
         const sessionKey = "spotit_session_" + roomId;
         localStorage.removeItem(sessionKey);
         setError(res.error || "Failed to join room");
-        setStatus("JOINING");
+        setStatus(GAME_STATUS.JOINING);
       }
     });
 
-    channel.on("lobbyUpdate", (data) => {
+    channel.on(EVENTS.LOBBY_UPDATE, (data) => {
       setLobbyInfo(data);
       if (data.teamName) setTeamName(data.teamName);
-      if (data.status === "LOBBY") setStatus("LOBBY");
+      if (data.status === GAME_STATUS.LOBBY) setStatus(GAME_STATUS.LOBBY);
     });
 
-    channel.on("gameStarted", (data) => {
+    channel.on(EVENTS.GAME_STARTED, (data) => {
       setCurrentClue(data.clue || "");
-      setStatus("PLAYING");
+      setStatus(GAME_STATUS.PLAYING);
       setScore(0);
       setTimeLeft(30);
     });
 
-    channel.on("timerUpdate", (data) => {
+    channel.on(EVENTS.TIMER_UPDATE, (data) => {
       setTimeLeft(data.timeLeft);
     });
 
-    channel.on("spotResult", (res) => {
+    channel.on(EVENTS.SPOT_RESULT, (res) => {
       if (res.success) {
         setScore((prev) => prev + (res.points || 0));
         setLastResult("HIT");
@@ -139,11 +158,11 @@ const Controller = () => {
       setTimeout(() => setLastResult(null), 800);
     });
 
-    channel.on("gameOver", () => {
-      setStatus("RESULTS");
+    channel.on(EVENTS.GAME_OVER, () => {
+      setStatus(GAME_STATUS.RESULTS);
     });
 
-    channel.on("exited", () => {
+    channel.on(EVENTS.EXITED, () => {
       const sessionKey = "spotit_session_" + roomId;
       localStorage.removeItem(sessionKey);
       window.location.href = "/screen";
@@ -156,10 +175,10 @@ const Controller = () => {
 
   const handleJoin = (e) => {
     e.preventDefault();
-    const finalName = teamName || teamNameInput;
+    const finalName = sanitizeInput(teamName || teamNameInput);
     if (!finalName.trim()) return;
     if (channelRef.current) {
-      channelRef.current.emit("joinRoom", {
+      channelRef.current.emit(EVENTS.JOIN_ROOM, {
         roomId,
         token,
         teamName: finalName,
@@ -170,19 +189,19 @@ const Controller = () => {
   const handleReady = () => {
     setIsReady(true);
     if (channelRef.current) {
-      channelRef.current.emit("setReady");
+      channelRef.current.emit(EVENTS.SET_READY);
     }
   };
 
   const handleStartGame = () => {
     if (isLeader && channelRef.current) {
-      channelRef.current.emit("startGame");
+      channelRef.current.emit(EVENTS.START_GAME);
     }
   };
 
   const handleExit = () => {
     if (channelRef.current) {
-      channelRef.current.emit("exitRoom");
+      channelRef.current.emit(EVENTS.EXIT_ROOM);
     } else {
       const sessionKey = "spotit_session_" + roomId;
       localStorage.removeItem(sessionKey);
@@ -191,7 +210,7 @@ const Controller = () => {
   };
 
   const handleTouchMove = (e) => {
-    if (status !== "PLAYING") return;
+    if (status !== GAME_STATUS.PLAYING) return;
     const touch = e.touches[0];
     if (lastTouchRef.current && channelRef.current) {
       const scale = 0.35;
@@ -206,7 +225,7 @@ const Controller = () => {
         Math.min(100, cursorRef.current.y + dy),
       );
       channelRef.current.emit(
-        "cursorUpdate",
+        EVENTS.CURSOR_UPDATE,
         { x: cursorRef.current.x, y: cursorRef.current.y },
         { reliable: false },
       );
@@ -214,7 +233,7 @@ const Controller = () => {
     lastTouchRef.current = { x: touch.clientX, y: touch.clientY };
   };
 
-  if (error && status === "CONNECTING") {
+  if (error && status === GAME_STATUS.CONNECTING) {
     return (
       <div className="controller-container items-center justify-center p-8 text-center">
         <AlertCircle
@@ -256,7 +275,7 @@ const Controller = () => {
               letterSpacing: "1px",
             }}
           >
-            {status === "PLAYING" ? (
+            {status === GAME_STATUS.PLAYING ? (
               <div className="flex items-center gap-1">
                 <TimerIcon
                   size={10}
@@ -283,7 +302,7 @@ const Controller = () => {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {status === "PLAYING" && (
+          {status === GAME_STATUS.PLAYING && (
             <div style={{ textAlign: "right", marginRight: "0.5rem" }}>
               <span
                 style={{
@@ -327,9 +346,9 @@ const Controller = () => {
       </header>
 
       <main style={{ display: "flex", flex: 1 }} className="flex-col relative">
-        {(status === "JOINING" ||
-          status === "LOBBY" ||
-          status === "RESULTS") && (
+        {(status === GAME_STATUS.JOINING ||
+          status === GAME_STATUS.LOBBY ||
+          status === GAME_STATUS.RESULTS) && (
           <div
             className="flex-col items-center justify-center p-6 animate-in"
             style={{ display: "flex", flex: 1 }}
@@ -338,7 +357,7 @@ const Controller = () => {
               className="glass-card w-full p-8 text-center"
               style={{ maxWidth: "400px" }}
             >
-              {status === "JOINING" && (
+              {status === GAME_STATUS.JOINING && (
                 <>
                   <Zap
                     size={48}
@@ -416,7 +435,7 @@ const Controller = () => {
                 </>
               )}
 
-              {(status === "LOBBY" || status === "RESULTS") && (
+              {(status === GAME_STATUS.LOBBY || status === GAME_STATUS.RESULTS) && (
                 <>
                   <h2
                     className="logo-text"
@@ -424,7 +443,7 @@ const Controller = () => {
                   >
                     {teamName}
                   </h2>
-                  {status === "RESULTS" && (
+                  {status === GAME_STATUS.RESULTS && (
                     <div
                       style={{
                         marginBottom: "2rem",
@@ -492,7 +511,7 @@ const Controller = () => {
                         }}
                       >
                         <Play fill="currentColor" size={20} />{" "}
-                        {status === "RESULTS" ? "RESTART" : "START"}
+                        {status === GAME_STATUS.RESULTS ? "RESTART" : "START"}
                       </button>
                     </div>
                   ) : !isReady ? (
@@ -531,7 +550,7 @@ const Controller = () => {
           </div>
         )}
 
-        {status === "PLAYING" && (
+        {status === GAME_STATUS.PLAYING && (
           <div
             className="flex-col animate-in"
             style={{ display: "flex", flex: 1, padding: "1rem", gap: "1rem" }}
@@ -590,8 +609,8 @@ const Controller = () => {
             </div>
             <button
               onClick={() => {
-                if (status === "PLAYING" && channelRef.current)
-                  channelRef.current.emit("spotObject");
+                if (status === GAME_STATUS.PLAYING && channelRef.current)
+                  channelRef.current.emit(EVENTS.SPOT_OBJECT);
               }}
               className="spot-btn"
               style={{
